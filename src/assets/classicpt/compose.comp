@@ -1,0 +1,26 @@
+#version 430
+// Classic PT, pass 4 of 4: the texture colour back in, exposure, the Look, tone mapping.
+// Looks (F10), as in the Alpha/Beta tracers: Beta keeps the game's bright, flat feel (more fill light, little
+// contrast), Traced is the plain result, Realistic darker shadows and more contrast.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba16f, binding = 0) uniform readonly image2D uLight;
+layout(rgba8, binding = 1) uniform readonly image2D uAlbedo;
+layout(rgba8, binding = 2) uniform writeonly image2D outImage;
+
+uniform ivec2 uRes;
+uniform float uExposure, uBrightness;
+uniform int uLook;   // 0 Beta, 1 Traced, 2 Realistic
+
+vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= uRes.x || px.y >= uRes.y) return;
+    vec3 alb = imageLoad(uAlbedo, px).rgb;
+    alb *= alb;
+    vec3 c = imageLoad(uLight, px).rgb;
+    if (uLook == 0) c = c * 0.8 + 0.35 * dot(c, vec3(0.333)) + 0.08;   // fill the shadows in, like the game
+    else if (uLook == 2) c = pow(c, vec3(1.15));
+    c *= alb * uExposure * uBrightness;
+    imageStore(outImage, px, vec4(pow(aces(c), vec3(1.0 / 2.2)), 1.0));
+}

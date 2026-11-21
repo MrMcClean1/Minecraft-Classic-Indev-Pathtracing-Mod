@@ -1,0 +1,90 @@
+package com.mrmcclean.classicpt;
+
+import org.lwjgl.input.Keyboard;
+
+/**
+ * Called from the game's own bytecode (see tweak.Hook). The path tracer is off when the game starts. Keys, the same
+ * as the Alpha and Beta path tracers': F7 on/off, F4 preset, F9 denoiser, F10 look, F6 photo mode, Home the view.
+ * Each change shows in the game's chat (and the log) and is saved to classicpt.properties.
+ */
+public final class Hooks {
+    private Hooks() {}
+
+    static final int[] KEYS = {Keyboard.KEY_F7, Keyboard.KEY_F4, Keyboard.KEY_F9, Keyboard.KEY_F10, Keyboard.KEY_F6, Keyboard.KEY_HOME};
+    static Game game;
+    static Tracer tracer;
+    static boolean enabled;
+    private static final boolean[] wasDown = new boolean[KEYS.length];
+    private static boolean broken;
+
+    private static boolean setup(Object owner) {
+        if (broken) return false;
+        if (game == null) {
+            game = Game.of(owner);
+            if (game == null) { broken = true; return false; }
+            tracer = new Tracer(game);
+            log("loaded for " + game.name + "; F7 turns the path tracer on and off");
+            Test.init(game);
+        }
+        return true;
+    }
+
+    /** Each frame, before Display.update (menus too). */
+    public static void frame(Object owner) {
+        try {
+            if (setup(owner)) Test.frame();
+        } catch (Throwable t) {
+            log("frame hook: " + t);
+        }
+    }
+
+    /** After the world is drawn, before the HUD. */
+    public static void beforeHud(float partial, Object owner) {
+        try {
+            if (!setup(owner)) return;
+            if (!Test.running() && Keyboard.isCreated() && game.noScreen()) keys();
+            Test.beforeTrace(partial);
+            if (enabled) tracer.render(partial);
+            Test.afterTrace(partial);
+        } catch (Throwable t) {
+            log("path tracer stopped: " + t);
+            t.printStackTrace();
+            enabled = false;
+        }
+    }
+
+    private static void keys() {
+        for (int i = 0; i < KEYS.length; i++) {
+            boolean down = Keyboard.isKeyDown(KEYS[i]);
+            if (down && !wasDown[i]) press(i);
+            wasDown[i] = down;
+        }
+    }
+
+    private static void press(int i) {
+        Settings s = tracer.settings;
+        switch (i) {
+            case 0: toggle(); return;
+            case 1: s.applyPreset((s.preset + 1) % 3); say("Path tracer preset: " + Settings.PRESETS[s.preset]); break;
+            case 2: s.denoiser = (s.denoiser + 1) % 3; say("Path tracer denoiser: " + Settings.DENOISERS[s.denoiser]); break;
+            case 3: s.look = (s.look + 1) % 3; say("Path tracer look: " + Settings.LOOKS[s.look]); break;
+            case 4: if (enabled) tracer.startPhoto(); else say("Photo mode needs the path tracer on (F7)"); return;
+            case 5: s.view = (s.view + 1) % Settings.VIEWS.length; say("Path tracer view: " + Settings.VIEWS[s.view]); break;
+        }
+        s.save();
+        tracer.resetHistory();
+    }
+
+    static void toggle() {
+        enabled = !enabled;
+        if (enabled) tracer.resetHistory();
+        say("Path tracer: " + (enabled ? "ON" : "OFF") + (tracer.failed ? " (" + tracer.status + ")" : ""));
+    }
+
+    static void say(String s) {
+        log(s);
+        if (game != null && !Test.running()) game.message(s);
+    }
+
+    static void log(String s) { System.out.println("[ClassicPT] " + s); }
+}

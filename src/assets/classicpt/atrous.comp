@@ -1,0 +1,52 @@
+#version 430
+// Classic PT, pass 3 of 4: the spatial filter (the same "a-trous" idea as the Alpha/Beta tracers' atrous.comp).
+// Each pass averages a pixel with neighbours 1, 2, 4, 8... pixels away, borrowing only from the same surface:
+// facing the same way, on the same plane, and (Advanced) of similar brightness given how settled the pixel is.
+// The texture colour was taken out before, so this blurs light, not textures.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba16f, binding = 0) uniform readonly image2D uIn;    // light, a = frames averaged
+layout(rgba16f, binding = 1) uniform readonly image2D uGeom;
+layout(rgba16f, binding = 2) uniform writeonly image2D outLight;
+
+uniform ivec2 uRes;
+uniform vec3 uFwd, uRight, uUp;
+uniform float uTan, uAspect;
+uniform int uStep;
+uniform int uAdvanced;
+
+float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec3 rayDir(ivec2 pixel) {
+    vec2 ndc = (vec2(pixel) + 0.5) / vec2(uRes) * 2.0 - 1.0;
+    return normalize(uFwd + ndc.x * uTan * uAspect * uRight + ndc.y * uTan * uUp);
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= uRes.x || px.y >= uRes.y) return;
+    vec4 c = imageLoad(uIn, px);
+    vec4 g = imageLoad(uGeom, px);
+    if (g.w < 0.0) { imageStore(outLight, px, c); return; }
+    vec3 pos = rayDir(px) * g.w;
+    float l = luminance(c.rgb);
+    // the more frames a pixel has averaged, the less it needs borrowing (and the tighter the brightness test)
+    float settle = clamp(c.a / 32.0, 0.0, 1.0);
+    float sigmaL = mix(2.0, 0.35, settle) * (l + 0.05);
+    const float K[3] = float[3](3.0 / 8.0, 1.0 / 4.0, 1.0 / 16.0);
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+    for (int dy = -2; dy <= 2; dy++) for (int dx = -2; dx <= 2; dx++) {
+        ivec2 q = px + ivec2(dx, dy) * uStep;
+        if (q.x < 0 || q.y < 0 || q.x >= uRes.x || q.y >= uRes.y) continue;
+        vec4 qg = imageLoad(uGeom, q);
+        if (qg.w < 0.0) continue;
+        vec4 qc = imageLoad(uIn, q);
+        float w = K[abs(dx)] * K[abs(dy)];
+        w *= pow(max(0.0, dot(qg.xyz, g.xyz)), 32.0);
+        vec3 qpos = rayDir(q) * qg.w;
+        w *= exp(-abs(dot(qpos - pos, g.xyz)) / (0.1 + 0.02 * g.w * float(uStep)));
+        if (uAdvanced != 0) w *= exp(-abs(luminance(qc.rgb) - l) / sigmaL);
+        sum += qc.rgb * w;
+        wsum += w;
+    }
+    imageStore(outLight, px, vec4(wsum > 0.0 ? sum / wsum : c.rgb, c.a));
+}

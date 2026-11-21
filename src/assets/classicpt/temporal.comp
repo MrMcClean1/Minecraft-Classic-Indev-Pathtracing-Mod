@@ -1,0 +1,71 @@
+#version 430
+// Classic PT, pass 2 of 4: temporal accumulation (the same idea as the Alpha/Beta tracers' temporal.comp).
+// Each pixel finds where its surface was on last frame's screen (from its distance and both cameras) and blends
+// this frame's noisy light into the light it had there, if it is the same surface (same facing, same plane).
+// Standing still the picture keeps adding up; moving, it starts again only where something new comes into view.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba16f, binding = 0) uniform readonly image2D uLight;      // this frame (trace.comp)
+layout(rgba16f, binding = 1) uniform readonly image2D uGeom;       // this frame: normal, distance
+layout(rgba16f, binding = 2) uniform readonly image2D uPrevAccum;  // last frame's result, a = frames averaged
+layout(rgba16f, binding = 3) uniform readonly image2D uPrevGeom;
+layout(rgba16f, binding = 4) uniform writeonly image2D outAccum;
+
+uniform ivec2 uRes;
+uniform vec3 uCam, uFwd, uRight, uUp, uPrevCam, uPrevFwd, uPrevRight, uPrevUp;
+uniform float uTan, uAspect;
+uniform int uHistoryValid;   // 0 after a resize, a level change, the tracer turned on
+uniform float uMaxHistory;   // frames averaged at most: more is smoother, light changes lag more
+uniform int uAdvanced;       // 1: also cut fireflies (Denoiser: Advanced)
+
+float luminance(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+vec3 rayDir(vec2 pixel, vec3 f, vec3 r, vec3 u) {
+    vec2 ndc = (pixel + 0.5) / vec2(uRes) * 2.0 - 1.0;
+    return normalize(f + ndc.x * uTan * uAspect * r + ndc.y * uTan * u);
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= uRes.x || px.y >= uRes.y) return;
+    vec4 g = imageLoad(uGeom, px);
+    vec3 cur = imageLoad(uLight, px).rgb;
+    if (g.w < 0.0) { imageStore(outAccum, px, vec4(cur, 1.0)); return; } // sky: nothing to add up
+    if (uAdvanced != 0) {
+        float ns = 0.0;
+        for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            ns += luminance(imageLoad(uLight, clamp(px + ivec2(dx, dy), ivec2(0), uRes - 1)).rgb);
+        }
+        float cap = 6.0 * ns / 8.0 + 0.3, lc = luminance(cur);
+        if (lc > cap) cur *= cap / lc;
+    }
+    vec3 world = uCam + rayDir(vec2(px), uFwd, uRight, uUp) * g.w;
+    vec3 rel = world - uPrevCam;
+    float z = dot(rel, uPrevFwd);
+    vec3 sum = vec3(0.0);
+    float len = 0.0, wsum = 0.0;
+    if (uHistoryValid != 0 && z > 0.05) {
+        vec2 ndc = vec2(dot(rel, uPrevRight) / (z * uTan * uAspect), dot(rel, uPrevUp) / (z * uTan));
+        vec2 p = (ndc * 0.5 + 0.5) * vec2(uRes) - 0.5;
+        ivec2 base = ivec2(floor(p));
+        vec2 f = p - vec2(base);
+        float tol = 0.05 + 0.015 * g.w;
+        for (int i = 0; i < 4; i++) {
+            ivec2 q = base + ivec2(i & 1, i >> 1);
+            if (q.x < 0 || q.y < 0 || q.x >= uRes.x || q.y >= uRes.y) continue;
+            vec4 pg = imageLoad(uPrevGeom, q);
+            if (pg.w < 0.0 || dot(pg.xyz, g.xyz) < 0.9) continue;
+            vec3 qWorld = uPrevCam + rayDir(vec2(q), uPrevFwd, uPrevRight, uPrevUp) * pg.w;
+            if (abs(dot(qWorld - world, g.xyz)) > tol) continue;
+            float w = ((i & 1) == 1 ? f.x : 1.0 - f.x) * ((i >> 1) == 1 ? f.y : 1.0 - f.y);
+            vec4 acc = imageLoad(uPrevAccum, q);
+            sum += acc.rgb * w; len += acc.a * w; wsum += w;
+        }
+    }
+    vec4 o;
+    if (wsum > 0.01) {
+        vec3 prev = sum / wsum;
+        float n = min(len / wsum, uMaxHistory);
+        o = vec4((prev * n + cur) / (n + 1.0), n + 1.0);
+    } else o = vec4(cur, 1.0);
+    imageStore(outAccum, px, o);
+}
