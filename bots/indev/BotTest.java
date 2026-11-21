@@ -75,7 +75,19 @@ public final class BotTest {
         PlayerEntity p = mc.player;
         if (p == null) return;
         p.health = 20; // the player takes no harm while the test runs
-        try { run(mc, p); } catch (Throwable t) { check(false, "step " + step + " threw " + t); finish(mc); }
+        try { run(mc, p); } catch (Throwable t) { check(false, "step " + step + " threw " + trace(t)); finish(mc); }
+    }
+
+    /** The exception, its cause, and where they came from (a few frames). */
+    private static String trace(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        for (Throwable c = t; c != null; c = c.getCause() == c ? null : c.getCause()) {
+            if (sb.length() > 0) sb.append(System.lineSeparator()).append("       caused by ");
+            sb.append(c);
+            StackTraceElement[] st = c.getStackTrace();
+            for (int i = 0; i < Math.min(4, st.length); i++) sb.append(System.lineSeparator()).append("         at ").append(st[i]);
+        }
+        return sb.toString();
     }
 
     private static BotEntity bot(World w) {

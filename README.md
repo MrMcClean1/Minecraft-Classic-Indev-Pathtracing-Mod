@@ -48,24 +48,34 @@ GPU, and checks the toggle. With the word `rtx` in the run file it then runs DLS
 Reconstruction and checks each against the native traced picture (`dlss.png`, `rr.png`). Report and pictures in
 `classicpt-test\<date>\`, then the game closes.
 
-## Classic Bots (Indev; Classic 0.30 to come)
+## Classic Bots (Indev and Classic 0.30)
 
-The same bots as Alpha PT, Beta PT and the Beta modpack, in Indev 20100223: `/bot on`, `/bot spawn [name]`, then
-talk to them ("Tess follow me", "Tess bring me 16 wood", "Tess set up a base here"...). Indev has no chat, so **T**
-(or **/**) opens the bots' own chat box and their lines are drawn over the game. Bots are saved in the level
-(`.mclevel`, entity id `ClassicBot`) and come back when it loads. Settings in `.minecraft\config\classicbots.properties`.
+The same bots as Alpha PT, Beta PT and the Beta modpack, in Indev 20100223 and Classic 0.30 survival: `/bot on`,
+`/bot spawn [name]`, then talk to them ("Tess follow me", "Tess bring me 16 wood", "Tess set up a base here"...).
+Neither game has a chat box in single player, so **T** (or **/**) opens the bots' own; their lines are drawn over the
+game in Indev and go to the HUD's chat in Classic. Bots are saved in the level and come back when it loads (Indev:
+`.mclevel`, entity id `ClassicBot`; Classic: its `.mine` file, which is Java serialization, as the bot's own record).
+Settings in `.minecraft\config\classicbots.properties`.
+
+Classic has no crafting, items, chests or furnaces, so a Classic bot gathers, builds, follows and fights: it breaks
+blocks by hand (everything but bedrock, as a Classic player does), carries blocks, and hands them over into the
+player's inventory. Classic's monsters (zombies, skeletons, creepers, spiders) are what it fights.
 
 How the sources stay one set: the bots are Alpha PT's files (`bots\sync.ps1` copies them into `bots\src`, package
 renamed), compiled against the game jar renamed to Alpha's Feather names (`tools\Remap.java named` with
 `bots\indev.mappings`, hand-made from javap), then turned back to the game's own names (`Remap back`). What Indev lacks
 or keeps differently (float positions, no block metadata setter with the id, squared `distanceTo`, a block-entity
 getter that casts any block) is a `STUB` in the mappings, answered by `bots\indev\Compat.java`. The per-game files
-(`Bots`, `Names`, `BotsClient`, `IndevBot`, `Entry`, chat, `BotTest`) live in `bots\indev`. The build fails if any
-game reference doesn't resolve. Classic PT reaches the bots by reflection (`Bots.java`); `tweak\Hook` also lets the
-level loader ask for unknown entity ids.
+(`Bots`, `Names`, `BotsClient`, `IndevBot`, `Entry`, chat, `BotTest`) live in `bots\indev`. Classic is the same with
+`bots\classic.mappings` and `bots\classic`, plus two more kinds of line: `SHIM` for an Alpha class Classic has nothing
+like (item stacks, NBT, materials, containers: the bots' own small classes in `bots\classic\shim`, moved next to
+`Compat` at build time) and `TEST` for a kind without a class (`instanceof Monster` asks `Compat.isMonster`). There
+a bot walks by Classic's own mob AI object (`BotAI`, whose `BasicAI` jumps and walks by the speeds the bot sets),
+since Classic's `Mob.tick` is final. The build fails if any game reference doesn't resolve. Classic PT reaches the
+bots by reflection (`Bots.java`); `tweak\Hook` also lets Indev's level loader ask for unknown entity ids.
 
-Test: an empty file `.minecraft\classicbots-test\run` arms one launch (in the background, muted, the mouse never
-taken, the player can't be hurt): makes a level, spawns a bot, orders it to follow and moves the player 12 blocks
+Test (either game): an empty file `.minecraft\classicbots-test\run` arms one launch (in the background, muted, the
+mouse never taken, the player can't be hurt): makes a level (Indev; Classic starts in one), spawns a bot, orders it to follow and moves the player 12 blocks
 (the bot has to walk there, a teleport fails), saves the level with the game's own writer, reads it back (bot, owner,
 things), opens it and checks the bot runs. Report in `classicbots-test\<date>\report.txt`; an empty
 `classicbots-test\debug` adds the bots' debug log (`log.txt` while a test runs).

@@ -21,18 +21,23 @@ import java.util.jar.*;
  *   CLASS  obf named
  *   FIELD  obfOwner obfName obfDesc named
  *   METHOD obfOwner obfName obfDesc named
- *   STUB   namedOwner name namedDesc [static]       field if the descriptor has no "(", else method: not in the
+ *   STUB   namedOwner name namedDesc [static] [protected]  field if the descriptor has no "(", else method: not in the
  *                                                   game; a field read becomes compat.get_name(owner)T, a write
  *                                                   compat.set_name(owner, T)V, a call compat.name(owner, args)
  *   ABSENT named [namedSuper]                        a class the game doesn't have: becomes the class Absent next to
  *                                                   the compat class (instanceof is always false)
+ *   TEST   named [namedSuper]                        as ABSENT, but instanceof asks compat.is<SimpleName>(Object)
+ *                                                   (a kind the game has without a class for it: Classic's monsters)
+ *   SHIM   named                                     a class the game doesn't have, written in the bots' sources
+ *                                                   under its Alpha name; it moves to <compat package>/shim/
  */
 public class Remap {
     static final Map<String, String> cls = new HashMap<>(), clsBack = new HashMap<>();
     static final Map<String, String> mem = new HashMap<>(), memBack = new HashMap<>(); // owner.name.desc -> name
-    static final Set<String> stubs = new LinkedHashSet<>(), staticStubs = new HashSet<>(); // namedOwner.name.namedDesc
+    static final Set<String> stubs = new LinkedHashSet<>(), staticStubs = new HashSet<>(), protectedStubs = new HashSet<>(); // namedOwner.name.namedDesc
     static final Set<String> absent = new LinkedHashSet<>();
     static final Map<String, String> absentSuper = new HashMap<>();
+    static final Set<String> tests = new HashSet<>(), shims = new HashSet<>();
     static final Map<String, String[]> supers = new HashMap<>(); // class -> super + interfaces (in the naming being read)
 
     public static void main(String[] a) throws Exception {
@@ -53,8 +58,15 @@ public class Remap {
             switch (t[0]) {
                 case "CLASS": cls.put(t[1], t[2]); clsBack.put(t[2], t[1]); break;
                 case "FIELD": case "METHOD": members.add(t); break;
-                case "STUB": stubs.add(t[1] + "." + t[2] + "." + t[3]); if (t.length > 4 && t[4].equals("static")) staticStubs.add(t[1] + "." + t[2] + "." + t[3]); break;
+                case "STUB": {
+                    String k = t[1] + "." + t[2] + "." + t[3];
+                    stubs.add(k);
+                    for (int i = 4; i < t.length; i++) if (t[i].equals("static")) staticStubs.add(k); else if (t[i].equals("protected")) protectedStubs.add(k);
+                    break;
+                }
+                case "TEST": tests.add(t[1]); // and absent
                 case "ABSENT": absent.add(t[1]); absentSuper.put(t[1], t.length > 2 ? t[2] : "java/lang/Object"); break;
+                case "SHIM": shims.add(t[1]); break;
                 default: throw new IOException("bad mapping line: " + line);
             }
         }
@@ -75,7 +87,11 @@ public class Remap {
         return new Remapper() {
             @Override public String map(String n) { return classes.getOrDefault(n, n); }
             @Override public String mapFieldName(String owner, String name, String desc) { return find(owner, name + "." + desc, name); }
-            @Override public String mapMethodName(String owner, String name, String desc) { return name.startsWith("<") ? name : find(owner, name + "." + desc, name); }
+            @Override public String mapMethodName(String owner, String name, String desc) {
+                if (name.startsWith("<")) return name;
+                if (overridesStub(owner, name, desc)) return OWN + name;
+                return find(owner, name + "." + desc, name);
+            }
             String find(String owner, String key, String name) {
                 Deque<String> todo = new ArrayDeque<>(Collections.singleton(owner));
                 Set<String> seen = new HashSet<>();
@@ -93,6 +109,28 @@ public class Remap {
                 return name;
             }
         };
+    }
+
+    /**
+     * A bots' method that overrides a stub (BotEntity.tick over Entity's): the game never calls a stub, and its own
+     * method of that name may be final (Classic's Mob.tick), so the bots' one is renamed, its calls too.
+     */
+    static final String OWN = "bots$";
+
+    static boolean overridesStub(String owner, String name, String desc) {
+        if (ownMethods.isEmpty()) return false; // named jar
+        Deque<String> todo = new ArrayDeque<>(Collections.singleton(owner));
+        Set<String> seen = new HashSet<>();
+        boolean own = false;
+        while (!todo.isEmpty()) {
+            String c = todo.pop();
+            if (!seen.add(c)) continue;
+            if (ownMethods.contains(c + "." + name)) own = true;
+            if (own && stubs.contains(c + "." + name + "." + desc)) return true;
+            String[] s = supers.get(c);
+            if (s != null) for (String x : s) if (x != null) todo.add(x);
+        }
+        return false;
     }
 
     /** Unmapped game members get this prefix in the named jar, so they never clash with Alpha's names (fields x, y, z). */
@@ -146,7 +184,7 @@ public class Remap {
 
     static void stub(ClassVisitor cv, String[] s, boolean itf) {
         boolean st = staticStubs.contains(s[0] + "." + s[1] + "." + s[2]);
-        int acc = Opcodes.ACC_PUBLIC | (st ? Opcodes.ACC_STATIC : 0);
+        int acc = (protectedStubs.contains(s[0] + "." + s[1] + "." + s[2]) ? Opcodes.ACC_PROTECTED : Opcodes.ACC_PUBLIC) | (st ? Opcodes.ACC_STATIC : 0);
         if (!s[2].startsWith("(")) { cv.visitField(acc | (itf ? Opcodes.ACC_STATIC | Opcodes.ACC_FINAL : 0), s[1], s[2], null, null).visitEnd(); return; }
         if (itf && !st) { cv.visitMethod(acc | Opcodes.ACC_ABSTRACT, s[1], s[2], null, null).visitEnd(); return; } // class files before Java 8: no default methods
         MethodVisitor mv = cv.visitMethod(acc, s[1], s[2], null, null);
@@ -174,25 +212,52 @@ public class Remap {
         }
         List<Path> files = new ArrayList<>();
         try (java.util.stream.Stream<Path> st = Files.walk(dir)) { st.filter(p -> p.toString().endsWith(".class")).forEach(files::add); }
-        for (Path p : files) addSupers(Files.readAllBytes(p));
+        for (Path p : files) {
+            byte[] b = Files.readAllBytes(p);
+            addSupers(b);
+            ClassReader cr = new ClassReader(b);
+            cr.accept(new ClassVisitor(Opcodes.ASM9) {
+                @Override public MethodVisitor visitMethod(int a, String n, String d, String sig, String[] ex) { ownMethods.add(cr.getClassName() + "." + n); return null; }
+            }, ClassReader.SKIP_CODE);
+        }
         Map<String, String> classesBack = new HashMap<>(clsBack);
-        for (String c : absent) classesBack.put(c, compat.substring(0, compat.lastIndexOf('/') + 1) + "Absent");
+        String pkg = compat.substring(0, compat.lastIndexOf('/') + 1);
+        for (String c : absent) classesBack.put(c, pkg + "Absent");
+        for (String c : shims) classesBack.put(c, pkg + "shim/" + c.substring(c.lastIndexOf('/') + 1));
         Remapper r = remapper(classesBack, memBack);
+        List<Path> out = new ArrayList<>();
         for (Path p : files) {
             ClassReader cr = new ClassReader(Files.readAllBytes(p));
             ClassWriter cw = new ClassWriter(0);
-            cr.accept(new ClassRemapper(new ClassVisitor(Opcodes.ASM9, cw) {
+            ClassVisitor v = new ClassRemapper(new ClassVisitor(Opcodes.ASM9, cw) {
                 @Override public MethodVisitor visitMethod(int acc, String n, String d, String sig, String[] ex) {
                     return new Redirect(super.visitMethod(acc, n, d, sig, ex), compat, r);
                 }
-            }, r), 0);
-            Files.write(p, cw.toByteArray());
+            }, r);
+            cr.accept(new ClassVisitor(Opcodes.ASM9, v) { // before the remapper: instanceof a TEST class (in Alpha's names)
+                @Override public MethodVisitor visitMethod(int acc, String n, String d, String sig, String[] ex) {
+                    return new MethodVisitor(Opcodes.ASM9, super.visitMethod(acc, n, d, sig, ex)) {
+                        @Override public void visitTypeInsn(int op, String t) {
+                            if (op == Opcodes.INSTANCEOF && tests.contains(t)) super.visitMethodInsn(Opcodes.INVOKESTATIC, compat, "is" + t.substring(t.lastIndexOf('/') + 1), "(Ljava/lang/Object;)Z", false);
+                            else super.visitTypeInsn(op, t);
+                        }
+                    };
+                }
+            }, 0);
+            String name = r.map(cr.getClassName());
+            Path to = dir.resolve(name + ".class");
+            if (!to.equals(p)) { Files.delete(p); Files.createDirectories(to.getParent()); }
+            Files.write(to, cw.toByteArray());
+            out.add(to);
         }
+        files = out;
         compatClass = compat;
         check(game, files);
     }
 
     static String compatClass = "";
+    /** The bots' own methods (class.name): a call to one that overrides a stub stays a call (BotEntity.aiTick). */
+    static final Set<String> ownMethods = new HashSet<>();
 
     /** Every reference to the game in the remapped classes must name a class and member the game has (else: a missing mapping). */
     static void check(Map<String, byte[]> game, List<Path> files) throws IOException {
@@ -260,7 +325,7 @@ public class Remap {
         Redirect(MethodVisitor mv, String compat, Remapper r) { super(Opcodes.ASM9, mv); this.compat = compat; this.r = r; }
 
         @Override public void visitFieldInsn(int op, String owner, String name, String desc) {
-            String stub = stubOwner(owner, name, desc);
+            String stub = stubOwner(owner, name, desc, false);
             if (stub == null) { super.visitFieldInsn(op, owner, name, desc); return; }
             boolean st = op == Opcodes.GETSTATIC || op == Opcodes.PUTSTATIC;
             String o = st ? "" : "L" + clsBack.getOrDefault(stub, stub) + ";"; // the declaring class, as compat takes it
@@ -269,20 +334,21 @@ public class Remap {
         }
 
         @Override public void visitMethodInsn(int op, String owner, String name, String desc, boolean itf) {
-            String stub = stubOwner(owner, name, desc);
+            String stub = op == Opcodes.INVOKESPECIAL || op == Opcodes.INVOKESTATIC ? stubOwner(owner, name, desc, false) : stubOwner(owner, name, desc, true);
             if (stub == null) { super.visitMethodInsn(op, owner, name, desc, itf); return; }
             String d = op == Opcodes.INVOKESTATIC ? desc : "(L" + clsBack.getOrDefault(stub, stub) + ";" + desc.substring(1);
             super.visitMethodInsn(Opcodes.INVOKESTATIC, compat, name, d, false);
         }
 
         /** The Alpha-named class declaring this stub, or null. owner/desc arrive in the game's names here. */
-        String stubOwner(String owner, String name, String desc) {
+        String stubOwner(String owner, String name, String desc, boolean virtual) {
             Deque<String> todo = new ArrayDeque<>(Collections.singleton(owner));
             Set<String> seen = new HashSet<>();
             while (!todo.isEmpty()) {
                 String c = todo.pop();
                 if (!seen.add(c)) continue;
                 String named = cls.getOrDefault(c, c);
+                if (virtual && ownMethods.contains(named + "." + name)) return null; // overridden by the bots: a real call
                 for (String s : stubs) {
                     String[] p = split(s);
                     if (p[0].equals(named) && p[1].equals(name)

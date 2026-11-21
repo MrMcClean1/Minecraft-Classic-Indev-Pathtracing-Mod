@@ -1,0 +1,246 @@
+# Classic 0.30 survival (c0.30-s-1858) -> Alpha 1.1.2_01 Feather names, for the Classic Bots (see tools/Remap.java).
+# Only what the bots use. Found with javap against the game jar. Classic is further from Alpha than Indev: no item
+# stacks, NBT, block entities, materials or tools, so those are SHIM classes (bots/classic/shim, the bots' own),
+# and what the game keeps another way is a STUB, filled in by bots/classic/.../Compat.java.
+
+# ------------------------------------------------------------------ classes
+CLASS a/a                                       net/minecraft/util/math/MathHelper
+CLASS com/mojang/minecraft/level/Level          net/minecraft/world/World
+CLASS com/mojang/minecraft/level/BlockMap       net/minecraft/world/EntityMap
+CLASS com/mojang/minecraft/level/tile/a         net/minecraft/block/Block
+CLASS com/mojang/minecraft/phys/AABB            net/minecraft/util/math/Box
+CLASS com/mojang/minecraft/a/c                  net/minecraft/util/math/Vec3d
+CLASS com/mojang/minecraft/g                    net/minecraft/util/hit/HitResult
+CLASS com/mojang/minecraft/Entity               net/minecraft/entity/Entity
+CLASS com/mojang/minecraft/mob/Mob              net/minecraft/entity/mob/MobEntity
+CLASS com/mojang/minecraft/player/Player        net/minecraft/entity/mob/player/PlayerEntity
+CLASS com/mojang/minecraft/player/Inventory     net/minecraft/entity/mob/player/PlayerInventory
+CLASS com/mojang/minecraft/item/Item            net/minecraft/entity/ItemEntity
+CLASS com/mojang/minecraft/mob/Zombie           net/minecraft/entity/mob/monster/ZombieEntity
+CLASS com/mojang/minecraft/mob/Spider           net/minecraft/entity/mob/monster/SpiderEntity
+CLASS com/mojang/minecraft/mob/Skeleton         net/minecraft/entity/mob/monster/SkeletonEntity
+CLASS com/mojang/minecraft/mob/Creeper          net/minecraft/entity/mob/monster/CreeperEntity
+CLASS com/mojang/minecraft/mob/Sheep            net/minecraft/entity/mob/animal/SheepEntity
+CLASS com/mojang/minecraft/mob/Pig              net/minecraft/entity/mob/animal/PigEntity
+CLASS com/mojang/minecraft/mob/ai/BasicAI       net/minecraft/entity/ai/BasicAI
+CLASS com/mojang/minecraft/l                    net/minecraft/client/Minecraft
+# no class for "a monster" in Classic: Compat.isMonster says (zombies, skeletons, creepers, spiders)
+TEST net/minecraft/entity/mob/monster/Monster net/minecraft/entity/mob/MobEntity
+ABSENT net/minecraft/entity/mob/animal/ChickenEntity net/minecraft/entity/mob/MobEntity
+ABSENT net/minecraft/entity/mob/animal/CowEntity net/minecraft/entity/mob/MobEntity
+ABSENT net/minecraft/entity/mob/monster/SlimeEntity net/minecraft/entity/mob/MobEntity
+# the bots' own stand-ins (never in a Classic level)
+SHIM net/minecraft/item/ItemStack
+SHIM net/minecraft/item/Item
+SHIM net/minecraft/item/FoodItem
+SHIM net/minecraft/inventory/Inventory
+SHIM net/minecraft/block/entity/BlockEntity
+SHIM net/minecraft/block/material/Material
+SHIM net/minecraft/nbt/NbtElement
+SHIM net/minecraft/nbt/NbtCompound
+SHIM net/minecraft/nbt/NbtList
+
+# ------------------------------------------------------------------ util
+METHOD a/a a (F)F sin
+METHOD a/a b (F)F cos
+METHOD a/a c (F)F sqrt
+STUB net/minecraft/util/math/MathHelper floor (D)I static
+STUB net/minecraft/util/math/MathHelper floor (F)I static
+STUB net/minecraft/util/math/Box minX D
+STUB net/minecraft/util/math/Box minY D
+STUB net/minecraft/util/math/Box minZ D
+STUB net/minecraft/util/math/Box maxX D
+STUB net/minecraft/util/math/Box maxY D
+STUB net/minecraft/util/math/Box maxZ D
+STUB net/minecraft/util/math/Box grown (DDD)Lnet/minecraft/util/math/Box;
+FIELD com/mojang/minecraft/phys/AABB x0 F minXf
+FIELD com/mojang/minecraft/phys/AABB y0 F minYf
+FIELD com/mojang/minecraft/phys/AABB z0 F minZf
+FIELD com/mojang/minecraft/phys/AABB x1 F maxXf
+FIELD com/mojang/minecraft/phys/AABB y1 F maxYf
+FIELD com/mojang/minecraft/phys/AABB z1 F maxZf
+
+# ------------------------------------------------------------------ blocks
+FIELD com/mojang/minecraft/level/tile/a b [Lcom/mojang/minecraft/level/tile/a; BY_ID
+FIELD com/mojang/minecraft/level/tile/a ac I id
+FIELD com/mojang/minecraft/level/tile/a ad Lcom/mojang/minecraft/level/tile/Tile$SoundType; soundType
+METHOD com/mojang/minecraft/level/tile/a g ()I dropId
+METHOD com/mojang/minecraft/level/tile/a f ()I dropCount
+METHOD com/mojang/minecraft/level/tile/a h ()I hardnessTicks
+METHOD com/mojang/minecraft/level/tile/a a (Lcom/mojang/minecraft/level/Level;IIIF)V dropItemsf
+METHOD com/mojang/minecraft/level/tile/a a (III)Lcom/mojang/minecraft/phys/AABB; getCollisionShape
+METHOD com/mojang/minecraft/level/tile/a d ()Lcom/mojang/minecraft/level/b/a; getLiquidType
+STUB net/minecraft/block/Block material Lnet/minecraft/block/material/Material;
+STUB net/minecraft/block/Block dropItems (Lnet/minecraft/world/World;IIII)V
+STUB net/minecraft/block/Block getDropItem (ILjava/util/Random;)I
+STUB net/minecraft/block/Block onBroken (Lnet/minecraft/world/World;IIII)V
+STUB net/minecraft/block/Block getRenderType ()I
+
+# ------------------------------------------------------------------ world (one array, no chunks, one player)
+FIELD com/mojang/minecraft/level/Level width I sizeX
+FIELD com/mojang/minecraft/level/Level height I sizeZ
+FIELD com/mojang/minecraft/level/Level depth I sizeY
+FIELD com/mojang/minecraft/level/Level blockMap Lcom/mojang/minecraft/level/BlockMap; entityMap
+FIELD com/mojang/minecraft/level/Level player Lcom/mojang/minecraft/Entity; player
+FIELD com/mojang/minecraft/level/Level random Ljava/util/Random; random
+FIELD com/mojang/minecraft/level/Level creativeMode Z creativeMode
+FIELD com/mojang/minecraft/level/BlockMap all Ljava/util/List; all
+METHOD com/mojang/minecraft/level/Level getTile (III)I getBlock
+METHOD com/mojang/minecraft/level/Level setTile (IIII)Z setBlock
+METHOD com/mojang/minecraft/level/Level addEntity (Lcom/mojang/minecraft/Entity;)V spawnEntity
+METHOD com/mojang/minecraft/level/Level removeEntity (Lcom/mojang/minecraft/Entity;)V despawnEntity
+METHOD com/mojang/minecraft/level/Level playSound (Ljava/lang/String;FFFFF)V playSoundf
+METHOD com/mojang/minecraft/level/Level clip (Lcom/mojang/minecraft/a/c;Lcom/mojang/minecraft/a/c;)Lcom/mojang/minecraft/g; rayTrace
+METHOD com/mojang/minecraft/level/Level getPlayer ()Lcom/mojang/minecraft/Entity; getPlayer
+METHOD com/mojang/minecraft/level/Level findEntities (Lcom/mojang/minecraft/Entity;Lcom/mojang/minecraft/phys/AABB;)Ljava/util/List; findEntities
+STUB net/minecraft/world/World playSound (Lnet/minecraft/entity/Entity;Ljava/lang/String;FF)V
+STUB net/minecraft/world/World entities Ljava/util/List;
+STUB net/minecraft/world/World players Ljava/util/List;
+STUB net/minecraft/world/World isMultiplayer Z
+STUB net/minecraft/world/World ticks J
+STUB net/minecraft/world/World time J
+STUB net/minecraft/world/World difficulty I
+STUB net/minecraft/world/World getData (III)B
+STUB net/minecraft/world/World getBlockMetadata (III)I
+STUB net/minecraft/world/World setBlockWithMetadata (IIIII)Z
+STUB net/minecraft/world/World getEntitiesOfType (Ljava/lang/Class;Lnet/minecraft/util/math/Box;)Ljava/util/List;
+STUB net/minecraft/world/World getHeight (II)I
+STUB net/minecraft/world/World isChunkLoaded (III)Z
+STUB net/minecraft/world/World addEntity (Lnet/minecraft/entity/Entity;)Z
+STUB net/minecraft/world/World playSound (DDDLjava/lang/String;FF)V
+STUB net/minecraft/world/World setTime (J)V
+STUB net/minecraft/world/World getBlockEntity (III)Lnet/minecraft/block/entity/BlockEntity;
+
+# ------------------------------------------------------------------ entities
+FIELD com/mojang/minecraft/Entity level Lcom/mojang/minecraft/level/Level; world
+FIELD com/mojang/minecraft/Entity x F xf
+FIELD com/mojang/minecraft/Entity y F yf
+FIELD com/mojang/minecraft/Entity z F zf
+FIELD com/mojang/minecraft/Entity xo F prevXf
+FIELD com/mojang/minecraft/Entity yo F prevYf
+FIELD com/mojang/minecraft/Entity zo F prevZf
+FIELD com/mojang/minecraft/Entity xd F velocityXf
+FIELD com/mojang/minecraft/Entity yd F velocityYf
+FIELD com/mojang/minecraft/Entity zd F velocityZf
+FIELD com/mojang/minecraft/Entity yRot F yaw
+FIELD com/mojang/minecraft/Entity xRot F pitch
+FIELD com/mojang/minecraft/Entity yRotO F prevYaw
+FIELD com/mojang/minecraft/Entity xRotO F prevPitch
+FIELD com/mojang/minecraft/Entity bb Lcom/mojang/minecraft/phys/AABB; shape
+FIELD com/mojang/minecraft/Entity onGround Z onGround
+FIELD com/mojang/minecraft/Entity horizontalCollision Z collidingHorizontally
+FIELD com/mojang/minecraft/Entity removed Z removed
+FIELD com/mojang/minecraft/Entity heightOffset F eyeHeight
+FIELD com/mojang/minecraft/Entity bbWidth F width
+FIELD com/mojang/minecraft/Entity bbHeight F height
+FIELD com/mojang/minecraft/Entity fallDistance F fallDistance
+FIELD com/mojang/minecraft/Entity footSize F stepHeight
+METHOD com/mojang/minecraft/Entity remove ()V remove
+METHOD com/mojang/minecraft/Entity setPos (FFF)V setPositionf
+METHOD com/mojang/minecraft/Entity moveTo (FFFFF)V setPositionAndAnglesf
+METHOD com/mojang/minecraft/Entity setSize (FF)V setSize
+METHOD com/mojang/minecraft/Entity distanceTo (Lcom/mojang/minecraft/Entity;)F distanceTo
+METHOD com/mojang/minecraft/Entity distanceToSqr (Lcom/mojang/minecraft/Entity;)F squaredDistanceTof
+METHOD com/mojang/minecraft/Entity isInWater ()Z isInWater
+METHOD com/mojang/minecraft/Entity isUnderWater ()Z isEyeInWater
+METHOD com/mojang/minecraft/Entity isInLava ()Z isInLava
+METHOD com/mojang/minecraft/Entity hurt (Lcom/mojang/minecraft/Entity;I)V hurt
+METHOD com/mojang/minecraft/Entity isFree (FFF)Z isFree
+STUB net/minecraft/entity/Entity x D
+STUB net/minecraft/entity/Entity y D
+STUB net/minecraft/entity/Entity z D
+STUB net/minecraft/entity/Entity velocityX D
+STUB net/minecraft/entity/Entity velocityY D
+STUB net/minecraft/entity/Entity velocityZ D
+STUB net/minecraft/entity/Entity random Ljava/util/Random;
+STUB net/minecraft/entity/Entity ticks I
+STUB net/minecraft/entity/Entity onFireTimer I
+STUB net/minecraft/entity/Entity breath I
+STUB net/minecraft/entity/Entity tick ()V
+STUB net/minecraft/entity/Entity isAlive ()Z
+STUB net/minecraft/entity/Entity takeDamage (Lnet/minecraft/entity/Entity;I)Z
+STUB net/minecraft/entity/Entity setPosition (DDD)V
+STUB net/minecraft/entity/Entity setPositionAndAngles (DDDFF)V
+STUB net/minecraft/entity/Entity distanceTo (DDD)D
+STUB net/minecraft/entity/Entity squaredDistanceTo (Lnet/minecraft/entity/Entity;)D
+STUB net/minecraft/entity/Entity canSee (Lnet/minecraft/entity/Entity;)Z
+STUB net/minecraft/entity/Entity getEyeHeight ()F
+STUB net/minecraft/entity/Entity isSubmergedIn (Lnet/minecraft/block/material/Material;)Z
+STUB net/minecraft/entity/Entity isInWall ()Z
+STUB net/minecraft/entity/Entity interact (Lnet/minecraft/entity/mob/player/PlayerEntity;)Z
+STUB net/minecraft/entity/Entity getSaveId ()Ljava/lang/String; protected
+STUB net/minecraft/entity/Entity writeCustomNbt (Lnet/minecraft/nbt/NbtCompound;)V
+STUB net/minecraft/entity/Entity readCustomNbt (Lnet/minecraft/nbt/NbtCompound;)V
+FIELD com/mojang/minecraft/mob/Mob health I health
+FIELD com/mojang/minecraft/mob/Mob textureName Ljava/lang/String; texture
+FIELD com/mojang/minecraft/mob/Mob yBodyRot F bodyYaw
+FIELD com/mojang/minecraft/mob/Mob hurtTime I hurtTime
+FIELD com/mojang/minecraft/mob/Mob deathTime I deathTime
+FIELD com/mojang/minecraft/mob/Mob dead Z dead
+FIELD com/mojang/minecraft/mob/Mob airSupply I airSupply
+FIELD com/mojang/minecraft/mob/Mob tickCount I tickCount
+FIELD com/mojang/minecraft/mob/Mob ai Lcom/mojang/minecraft/mob/ai/AI; ai
+METHOD com/mojang/minecraft/mob/Mob heal (I)V heal
+METHOD com/mojang/minecraft/mob/Mob aiStep ()V aiStep
+STUB net/minecraft/entity/mob/MobEntity walkSpeed F
+STUB net/minecraft/entity/mob/MobEntity sidewaysSpeed F
+STUB net/minecraft/entity/mob/MobEntity forwardSpeed F
+STUB net/minecraft/entity/mob/MobEntity jumping Z
+STUB net/minecraft/entity/mob/MobEntity interpolateOnly Z
+STUB net/minecraft/entity/mob/MobEntity attackAnimationProgress F
+STUB net/minecraft/entity/mob/MobEntity aiTick ()V protected
+STUB net/minecraft/entity/mob/MobEntity getTexture ()Ljava/lang/String;
+STUB net/minecraft/entity/mob/MobEntity getAmbientSound ()Ljava/lang/String; protected
+STUB net/minecraft/entity/mob/MobEntity getHurtSound ()Ljava/lang/String; protected
+STUB net/minecraft/entity/mob/MobEntity getDeathSound ()Ljava/lang/String; protected
+FIELD com/mojang/minecraft/mob/ai/BasicAI xxa F sidewaysSpeed
+FIELD com/mojang/minecraft/mob/ai/BasicAI yya F forwardSpeed
+FIELD com/mojang/minecraft/mob/ai/BasicAI jumping Z jumping
+FIELD com/mojang/minecraft/mob/ai/BasicAI noActionTime I noActionTime
+FIELD com/mojang/minecraft/mob/ai/BasicAI runSpeed F runSpeed
+FIELD com/mojang/minecraft/mob/ai/BasicAI mob Lcom/mojang/minecraft/mob/Mob; mob
+METHOD com/mojang/minecraft/mob/ai/BasicAI update ()V update
+FIELD com/mojang/minecraft/player/Player inventory Lcom/mojang/minecraft/player/Inventory; inventory
+STUB net/minecraft/entity/mob/player/PlayerEntity name Ljava/lang/String;
+FIELD com/mojang/minecraft/player/Inventory slots [I slots
+FIELD com/mojang/minecraft/player/Inventory count [I counts
+FIELD com/mojang/minecraft/player/Inventory selected I selectedSlot
+METHOD com/mojang/minecraft/player/Inventory addResource (I)Z addResource
+METHOD com/mojang/minecraft/player/Inventory removeResource (I)Z removeResource
+STUB net/minecraft/entity/mob/player/PlayerInventory items [Lnet/minecraft/item/ItemStack;
+STUB net/minecraft/entity/mob/player/PlayerInventory addItem (Lnet/minecraft/item/ItemStack;)Z
+STUB net/minecraft/entity/mob/player/PlayerInventory getSelectedItem ()Lnet/minecraft/item/ItemStack;
+STUB net/minecraft/entity/ItemEntity item Lnet/minecraft/item/ItemStack;
+STUB net/minecraft/entity/ItemEntity pickUpDelay I
+
+# ------------------------------------------------------------------ client (chat box, the HUD's chat, the test)
+CLASS com/mojang/minecraft/e/o                  net/minecraft/client/gui/screen/Screen
+CLASS com/mojang/minecraft/e/h                  net/minecraft/client/gui/DrawableHelper
+CLASS com/mojang/minecraft/e/l                  net/minecraft/client/render/TextRenderer
+CLASS com/mojang/minecraft/e/m                  net/minecraft/client/gui/hud/InGameHud
+CLASS com/mojang/minecraft/k                    net/minecraft/client/options/GameOptions
+FIELD com/mojang/minecraft/l b I displayWidth
+FIELD com/mojang/minecraft/l c I displayHeight
+FIELD com/mojang/minecraft/l d Lcom/mojang/minecraft/level/Level; world
+FIELD com/mojang/minecraft/l f Lcom/mojang/minecraft/player/Player; player
+FIELD com/mojang/minecraft/l n Lcom/mojang/minecraft/e/l; textRenderer
+FIELD com/mojang/minecraft/l o Lcom/mojang/minecraft/e/o; screen
+FIELD com/mojang/minecraft/l w Lcom/mojang/minecraft/e/m; hud
+FIELD com/mojang/minecraft/l B Lcom/mojang/minecraft/k; options
+METHOD com/mojang/minecraft/l a (Lcom/mojang/minecraft/e/o;)V openScreen
+METHOD com/mojang/minecraft/l a (Lcom/mojang/minecraft/level/Level;)V setWorld
+METHOD com/mojang/minecraft/e/m a (Ljava/lang/String;)V addChatMessage
+FIELD com/mojang/minecraft/e/o a Lcom/mojang/minecraft/l; minecraft
+FIELD com/mojang/minecraft/e/o b I width
+FIELD com/mojang/minecraft/e/o c I height
+FIELD com/mojang/minecraft/e/o f Lcom/mojang/minecraft/e/l; textRenderer
+METHOD com/mojang/minecraft/e/o a (II)V render
+METHOD com/mojang/minecraft/e/o a (CI)V keyPressed
+METHOD com/mojang/minecraft/e/o a ()V init
+METHOD com/mojang/minecraft/e/o b ()V removed
+METHOD com/mojang/minecraft/e/o c ()V tick
+METHOD com/mojang/minecraft/e/h a (IIIII)V fill
+METHOD com/mojang/minecraft/e/l a (Ljava/lang/String;III)V drawWithShadow
+METHOD com/mojang/minecraft/e/l a (Ljava/lang/String;)I getWidth
+FIELD com/mojang/minecraft/k a Z music
+FIELD com/mojang/minecraft/k b Z sound

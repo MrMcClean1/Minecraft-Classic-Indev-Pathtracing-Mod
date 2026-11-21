@@ -48,7 +48,8 @@ foreach ($k in $l3.Keys) { Copy-Item $l3[$k] "$vkOut\$k.bin" }
 $asm = "$lib\org\ow2\asm"
 $remapCp = (("$asm\asm\9.10.1\asm-9.10.1.jar", "$asm\asm-commons\9.10.1\asm-commons-9.10.1.jar", "$asm\asm-tree\9.10.1\asm-tree-9.10.1.jar") -join ';')
 $lwjgl2 = "$lib\org\lwjgl\lwjgl\lwjgl\2.9.4-nightly-20150209\lwjgl-2.9.4-nightly-20150209.jar"
-foreach ($g in @(@{ name = 'indev'; jar = "$lib\com\mojang\minecraft\in-20100223\minecraft-in-20100223-client.jar" })) {
+foreach ($g in @(@{ name = 'indev'; jar = "$lib\com\mojang\minecraft\in-20100223\minecraft-in-20100223-client.jar" },
+                 @{ name = 'classic'; jar = "$lib\com\mojang\minecraft\c0.30-s-1858\minecraft-c0.30-s-1858-client.jar" })) {
   $n = $g.name
   $named = "$root\build\$n-named.jar"
   & "$jdk\java.exe" -cp $remapCp "$root\tools\Remap.java" named $g.jar "$root\bots\$n.mappings" $named 2>$null
@@ -56,7 +57,7 @@ foreach ($g in @(@{ name = 'indev'; jar = "$lib\com\mojang\minecraft\in-20100223
   $bsrc = "$root\build\bots-$n-src"; $bcls = "$root\build\bots-$n-classes"
   Remove-Item -Recurse -Force $bsrc, $bcls -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force $bsrc, $bcls | Out-Null
-  foreach ($f in @(Get-ChildItem "$root\bots\src" -Recurse -Filter *.java) + @(Get-ChildItem "$root\bots\$n" -Filter *.java)) {
+  foreach ($f in @(Get-ChildItem "$root\bots\src" -Recurse -Filter *.java) + @(Get-ChildItem "$root\bots\$n" -Recurse -Filter *.java)) { # with bots\<game>\shim (Alpha classes the game lacks)
     $t = [IO.File]::ReadAllText($f.FullName).Replace('package com.mrmcclean.classicpt.bots;', "package com.mrmcclean.classicpt.bots.$n;")
     [IO.File]::WriteAllText("$bsrc\$($f.Name)", $t) # a per-game file of the same name replaces the shared one
   }

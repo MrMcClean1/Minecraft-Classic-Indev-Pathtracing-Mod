@@ -15,14 +15,13 @@ final class Bots {
     private static boolean load(ClassLoader cl, boolean indev) {
         if (tried) return frame != null;
         tried = true;
-        if (!indev) return false; // Classic 0.30: not yet
         try {
-            Class<?> c = Class.forName("com.mrmcclean.classicpt.bots.indev.Entry", true, cl);
+            Class<?> c = Class.forName("com.mrmcclean.classicpt.bots." + (indev ? "indev" : "classic") + ".Entry", true, cl);
             frame = c.getMethod("frame", Object.class);
             entity = c.getMethod("entity", Object.class, String.class);
             return true;
         } catch (Throwable t) {
-            Hooks.log("Classic Bots not loaded: " + t);
+            Hooks.botsError(t);
             return false;
         }
     }

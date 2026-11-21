@@ -39,7 +39,7 @@ public final class Hooks {
         try {
             if (setup(owner)) Bots.frame(game);
         } catch (Throwable t) {
-            log("bots: " + t);
+            botsError(t);
         }
         try {
             if (setup(owner)) {
@@ -50,6 +50,17 @@ public final class Hooks {
         } catch (Throwable t) {
             log("frame hook: " + t);
         }
+    }
+
+    private static boolean botsErrorWritten;
+
+    /** The bots failed: the log, and (once, with the stack) classicbots-test/error.txt while a bot test folder is there. */
+    static void botsError(Throwable t) {
+        log("bots: " + t);
+        if (botsErrorWritten || !new java.io.File("classicbots-test").isDirectory()) return;
+        botsErrorWritten = true;
+        if (t instanceof java.lang.reflect.InvocationTargetException && t.getCause() != null) t = t.getCause();
+        try (java.io.PrintStream p = new java.io.PrintStream(new java.io.FileOutputStream(new java.io.File("classicbots-test", "error.txt"), true))) { t.printStackTrace(p); } catch (Exception ignored) {}
     }
 
     /** After the world is drawn, before the HUD. */
