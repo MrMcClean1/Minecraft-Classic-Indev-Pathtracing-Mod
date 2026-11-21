@@ -21,10 +21,16 @@ public class ClassicBot extends BotEntity {
         this.ai = new BotAI(this);
     }
 
+    private transient int calm;
+
     /** One AI tick: the bot's tick and aiTick (Alpha's order: tick, then the AI in tickMovement). */
     void tickBot() {
         tick();
         aiTick();
+        // Classic has no food (an Alpha bot eats to heal): a bot not hurt for 5 s gets 1 health back every 2 s, so it
+        // can fight again instead of running from everything at low health
+        if (hurtTime > 0) calm = 0;
+        else if (++calm > 100 && calm % 40 == 0 && health > 0 && health < 20) heal(1);
     }
 
     @Override

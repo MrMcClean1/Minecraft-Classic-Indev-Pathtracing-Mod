@@ -879,6 +879,7 @@ public class Brain {
 
     /** Hand crafting without a table window: the bot just knows the recipes for its own tools. */
     boolean craft(int out, int outCount, int[] needs) {
+        if (!Names.CRAFTING) return false;
         for (int i = 0; i < needs.length; i += 2) if (b.count(needs[i]) < needs[i + 1]) return false;
         for (int i = 0; i < needs.length; i += 2) b.take(needs[i], needs[i + 1]);
         b.add(new ItemStack(out, outCount, 0));

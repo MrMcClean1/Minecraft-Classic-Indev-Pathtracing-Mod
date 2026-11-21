@@ -14,6 +14,8 @@ foreach ($n in $shared) {
                   'new java.io.File("classicbots-test", "debug").isFile()')
   # a stub can't stand in for a constructor: Alpha's ItemEntity(World, double x3, ItemStack) is made by Compat
   $t = $t.Replace('new ItemEntity(', 'Compat.newItemEntity(')
+  # Classic has no crafting: each game's Names says whether a bot may craft
+  $t = $t.Replace('    boolean craft(int out, int outCount, int[] needs) {', "    boolean craft(int out, int outCount, int[] needs) {`n        if (!Names.CRAFTING) return false;")
   [IO.File]::WriteAllText("$to\$n.java", $t)
 }
 "synced $($shared.Count) files from $From"

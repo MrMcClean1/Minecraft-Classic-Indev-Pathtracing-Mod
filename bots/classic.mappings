@@ -86,7 +86,9 @@ FIELD com/mojang/minecraft/level/Level random Ljava/util/Random; random
 FIELD com/mojang/minecraft/level/Level creativeMode Z creativeMode
 FIELD com/mojang/minecraft/level/BlockMap all Ljava/util/List; all
 METHOD com/mojang/minecraft/level/Level getTile (III)I getBlock
-METHOD com/mojang/minecraft/level/Level setTile (IIII)Z setBlock
+METHOD com/mojang/minecraft/level/Level setTile (IIII)Z setTile
+# only ids Classic has a block for (a crafted chest or door would put a block Classic can't draw)
+STUB net/minecraft/world/World setBlock (IIII)Z
 METHOD com/mojang/minecraft/level/Level addEntity (Lcom/mojang/minecraft/Entity;)V spawnEntity
 METHOD com/mojang/minecraft/level/Level removeEntity (Lcom/mojang/minecraft/Entity;)V despawnEntity
 METHOD com/mojang/minecraft/level/Level playSound (Ljava/lang/String;FFFFF)V playSoundf

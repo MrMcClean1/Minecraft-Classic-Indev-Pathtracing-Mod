@@ -233,8 +233,12 @@ public final class Compat {
     }
     public static void set_material(Block b, Material m) {}
 
-    public static void dropItems(Block b, World w, int x, int y, int z, int meta) { b.dropItemsf(w, x, y, z, 1.0F); }
-    public static int getDropItem(Block b, int meta, Random r) { return b.dropId(); }
+    /** Classic's own drops, but a bot breaking a log gets the log (a player gets planks, and "bring me wood" means logs). */
+    public static void dropItems(Block b, World w, int x, int y, int z, int meta) {
+        if (b.id == 17) { if (!w.creativeMode) w.spawnEntity(new ItemEntity(w, x + 0.5F, y + 0.5F, z + 0.5F, 17)); return; }
+        b.dropItemsf(w, x, y, z, 1.0F);
+    }
+    public static int getDropItem(Block b, int meta, Random r) { return b.id == 17 ? 17 : b.dropId(); }
     public static void onBroken(Block b, World w, int x, int y, int z, int meta) {}
     public static int getRenderType(Block b) { return get_material(b) == Material.PLANT ? 1 : 0; }
 
@@ -274,7 +278,13 @@ public final class Compat {
 
     public static byte getData(World w, int x, int y, int z) { return 0; }
     public static int getBlockMetadata(World w, int x, int y, int z) { return 0; }
-    public static boolean setBlockWithMetadata(World w, int x, int y, int z, int id, int meta) { return inside(w, x, y, z) && w.setBlock(x, y, z, id); }
+    public static boolean setBlockWithMetadata(World w, int x, int y, int z, int id, int meta) { return setBlock(w, x, y, z, id); }
+
+    /** Only air or a block Classic has (Classic's setTile takes any byte and then fails to draw or tick it). */
+    public static boolean setBlock(World w, int x, int y, int z, int id) {
+        if (!inside(w, x, y, z) || id < 0 || id >= Block.BY_ID.length || id != 0 && Block.BY_ID[id] == null) return false;
+        return w.setTile(x, y, z, id);
+    }
 
     public static List getEntitiesOfType(World w, Class<?> type, Box b) {
         List<Entity> out = new ArrayList<>();

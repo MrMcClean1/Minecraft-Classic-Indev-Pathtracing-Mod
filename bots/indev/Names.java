@@ -7,6 +7,9 @@ import net.minecraft.block.material.Material;
 public final class Names {
     private Names() {}
 
+    /** Indev has crafting tables, chests and furnaces: bots craft. */
+    static final boolean CRAFTING = true;
+
     private static final String[] NAMES = new String[400];
     static {
         String[] b = {"", "stone", "grass", "dirt", "cobblestone", "planks", "sapling", "bedrock", "water", "water", "lava", "lava", "sand", "gravel",

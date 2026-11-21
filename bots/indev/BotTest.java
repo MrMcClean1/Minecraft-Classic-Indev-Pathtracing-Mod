@@ -18,7 +18,10 @@ import java.util.*;
  *  1. a small level (from the title screen), bots on in memory;
  *  2. /bot spawn Tess: a bot next to the player;
  *  3. "Tess follow me", the player moved about 12 blocks: the bot walks up to within 4 blocks;
- *  4. the bot gets 5 cobblestone; the level is saved with the game's own writer and read back with its own reader:
+ *  4. the jobs, by chat as a player would: bring me 4 wood, bring me 3 cobblestone (Indev: it crafts its own
+ *     pickaxe), set up a base here (Indev: with a chest), guard (a zombie by it dies), build a hut here;
+ *     Indev also: keep me stocked with 4 dirt (into the home chest), bring me 2 iron (it makes a furnace, smelts);
+ *  5. the bot gets 5 cobblestone; the level is saved with the game's own writer and read back with its own reader:
  *     the bot is in it with its name, owner and things; that level is opened and the bot ticks in it.
  * Report in classicbots-test/<date>/report.txt, then the game closes.
  */
@@ -78,6 +81,29 @@ public final class BotTest {
         try { run(mc, p); } catch (Throwable t) { check(false, "step " + step + " threw " + trace(t)); finish(mc); }
     }
 
+    private static net.minecraft.entity.mob.MobEntity zombie;
+    private static Blueprint plan;
+    private static World world;
+    private static int px, py, pz, pf;
+    /** Classic has no chests: a base is its home only. */
+    private static final boolean NO_CHESTS = false;
+
+    private static void say(PlayerEntity p, String msg) { Bots.chat(p, msg); }
+
+    private static int has(PlayerEntity p, int id) {
+        int n = 0;
+        for (ItemStack s : p.inventory.items) if (s != null && s.id == id) n += s.size;
+        return n;
+    }
+
+    private static String status(World w) { BotEntity b = bot(w); return b == null ? "gone" : b.brain.statusLine() + ", carrying " + b.brain.inventoryLine(); }
+
+    /** Passes when ok, fails after the limit (seconds); either way on to the next step. */
+    private static void waitFor(boolean ok, int seconds, String what) {
+        if (ok) { check(true, what + " in " + inStep() / 1000 + " s"); next(); }
+        else if (inStep() > seconds * 1000L) { check(false, what + " after " + seconds + " s; bot: " + status(world)); next(); }
+    }
+
     /** The exception, its cause, and where they came from (a few frames). */
     private static String trace(Throwable t) {
         StringBuilder sb = new StringBuilder();
@@ -96,7 +122,7 @@ public final class BotTest {
     }
 
     private static void run(Minecraft mc, PlayerEntity p) throws Exception {
-        World w = mc.world;
+        World w = mc.world; world = w;
         switch (step) {
             case 0:
                 BotConfig.enabled = true; // in memory: not saved
@@ -136,7 +162,52 @@ public final class BotTest {
                 if (inStep() > 45000) { check(false, String.format("follows: still %.1f blocks away after 45 s (mode %s)", d, b == null ? "-" : String.valueOf(b.brain.mode))); next(); }
                 return;
             }
-            case 4: { // save and load with the level
+            // ---- the jobs: gather, base, guard, build (each with a time limit; a fail goes on to the next)
+            case 4: say(p, "Tess bring me 4 wood"); next(); return;
+            case 5: waitFor(has(p, 17) >= 4, 240, "gather wood: the player got " + has(p, 17) + " logs"); return;
+            case 6: say(p, "Tess bring me 3 cobblestone"); next(); return;
+            case 7: waitFor(has(p, 4) >= 3, 360, "gather cobblestone: the player got " + has(p, 4)); return;
+            case 8: { BotEntity b = bot(w); b.add(new ItemStack(5, 8, 0)); say(p, "Tess set up a base here"); next(); return; }
+            case 9: { BotEntity b = bot(w); int[] c = b.brain.findNear(new int[]{54}, b.homeX, b.homeY, b.homeZ, 6, false);
+                waitFor(b.hasHome && (c != null || NO_CHESTS), 20, "base: home set" + (NO_CHESTS ? " (no chests in this game)" : ", chest " + (c == null ? "none" : c[0] + " " + c[1] + " " + c[2]))); return; }
+            case 10: {
+                BotEntity b = bot(w);
+                say(p, "Tess guard");
+                w.difficulty = 1;
+                net.minecraft.entity.mob.monster.ZombieEntity z = new net.minecraft.entity.mob.monster.ZombieEntity(w); z.setPositionAndAngles(b.x + 5, b.y, b.z, 0, 0);
+                w.addEntity(z);
+                zombie = z;
+                next();
+                return;
+            }
+            case 11: waitFor(zombie.removed || zombie.health <= 0, 60, "guard: the zombie " + (zombie.removed || zombie.health <= 0 ? "is dead" : "still has " + zombie.health + " health") + ", bot health " + bot(w).health); return;
+            case 12: {
+                BotEntity b = bot(w);
+                b.brain.mode = Brain.Mode.STAY;
+                int sx = (int) Math.floor(p.x), sz = (int) Math.floor(p.z);
+                p.setPosition(sx + 0.5, w.getHeight(sx, sz) + 1.62 + 0.1, sz + 0.5);
+                b.setPositionAndAngles(p.x + 1, p.y - 1.62 + 0.1, p.z, 0, 0);
+                b.add(new ItemStack(4, 64, 0)); b.add(new ItemStack(5, 32, 0));
+                say(p, "Tess build a hut here");
+                plan = b.brain.plan; px = b.brain.planX; py = b.brain.planY; pz = b.brain.planZ; pf = b.brain.planF;
+                if (plan == null) { check(false, "build: no plan made (" + b.brain.lastReport + ")"); next(); return; }
+                next();
+                return;
+            }
+            case 13: {
+                int ok = 0, total = 0;
+                for (int[] pb : plan.blocks) { if (pb[3] == 0) continue; total++; int[] at = Blueprint.place(pb, px, py, pz, pf); if (w.getBlock(at[0], at[1], at[2]) == pb[3]) ok++; }
+                boolean done = bot(w).brain.plan == null && ok * 10 >= total * 9;
+                if (done || inStep() > 150000) { check(done, "build a hut: " + ok + " of " + total + " blocks in place in " + inStep() / 1000 + " s" + (done ? "" : "; bot: " + status(w))); next(); }
+                return;
+            }
+            case 14: say(p, "Tess keep me stocked with 4 dirt"); next(); return;
+            case 15: { BotEntity b = bot(w); int n = 0; int[] c = b.brain.findNear(new int[]{54}, b.homeX, b.homeY, b.homeZ, 6, false);
+                if (c != null) { net.minecraft.block.entity.BlockEntity be = w.getBlockEntity(c[0], c[1], c[2]); if (be instanceof net.minecraft.inventory.Inventory) { net.minecraft.inventory.Inventory inv = (net.minecraft.inventory.Inventory) be; for (int i = 0; i < inv.getSize(); i++) { ItemStack s = inv.getItem(i); if (s != null && s.id == 3) n += s.size; } } }
+                waitFor(n >= 4, 240, "chore: the home chest has " + n + " dirt"); return; }
+            case 16: { BotEntity b = bot(w); say(p, "Tess stop chores"); b.brain.mode = Brain.Mode.FOLLOW; b.add(new ItemStack(15, 2, 0)); b.add(new ItemStack(263, 4, 0)); b.add(new ItemStack(4, 8, 0)); say(p, "Tess bring me 2 iron"); next(); return; }
+            case 17: waitFor(has(p, 265) >= 2, 240, "smelt: the player got " + has(p, 265) + " iron ingots (crafted a furnace, smelted the ore)"); if (step == 18) { step = 30; stepStart = System.currentTimeMillis(); } return;
+            case 30: { // save and load with the level
                 BotEntity b = bot(w);
                 if (b == null) { check(false, "the bot is still there before saving"); finish(mc); return; }
                 b.add(new ItemStack(4, 5, 0));
@@ -156,7 +227,7 @@ public final class BotTest {
                 next();
                 return;
             }
-            case 5: {
+            case 31: {
                 if (inStep() < 3000) return;
                 BotEntity b = bot(w);
                 check(b != null && b.ticks > ticksBefore + 20, "the loaded level runs the bot (" + (b == null ? "no bot" : (b.ticks - ticksBefore) + " ticks") + ")");

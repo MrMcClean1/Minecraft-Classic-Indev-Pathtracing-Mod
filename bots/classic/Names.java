@@ -6,6 +6,9 @@ import net.minecraft.block.Block;
 public final class Names {
     private Names() {}
 
+    /** Classic has no crafting: bots gather, build, follow and fight with what they find. */
+    static final boolean CRAFTING = false;
+
     private static final String[] NAMES = new String[400];
     static {
         String[] b = {"", "stone", "grass", "dirt", "cobblestone", "planks", "sapling", "bedrock", "water", "water", "lava", "lava", "sand", "gravel",

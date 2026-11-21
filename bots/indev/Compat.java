@@ -164,10 +164,15 @@ public final class Compat {
     public static int getBlockMetadata(World w, int x, int y, int z) { return inside(w, x, y, z) ? w.getData(x, y, z) & 15 : 0; }
 
     public static boolean setBlockWithMetadata(World w, int x, int y, int z, int id, int meta) {
-        if (!inside(w, x, y, z)) return false;
-        boolean r = w.setBlock(x, y, z, id);
+        if (!setBlock(w, x, y, z, id)) return false;
         w.setData(x, y, z, meta);
-        return r;
+        return true;
+    }
+
+    /** Only air or a block Indev has (Indev's setter takes any id, then can't draw it: a door froze the game). */
+    public static boolean setBlock(World w, int x, int y, int z, int id) {
+        if (!inside(w, x, y, z) || id < 0 || id >= Block.BY_ID.length || id != 0 && Block.BY_ID[id] == null) return false;
+        return w.setTile(x, y, z, id);
     }
 
     public static List getEntitiesOfType(World w, Class<?> type, Box b) {

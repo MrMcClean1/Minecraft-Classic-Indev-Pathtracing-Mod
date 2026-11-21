@@ -150,7 +150,9 @@ FIELD net/minecraft/a/a/g D I time
 FIELD net/minecraft/a/a/g E I difficulty
 FIELD net/minecraft/a/a/i e Ljava/util/List; all
 METHOD net/minecraft/a/a/g a (III)I getBlock
-METHOD net/minecraft/a/a/g b (IIII)Z setBlock
+METHOD net/minecraft/a/a/g b (IIII)Z setTile
+# only ids Indev has a block for (a door, which Indev lacks, froze the game: it set the byte, then failed to draw it)
+STUB net/minecraft/world/World setBlock (IIII)Z
 METHOD net/minecraft/a/a/g e (III)B getData
 METHOD net/minecraft/a/a/g f (IIII)V setData
 METHOD net/minecraft/a/a/g f (III)Lnet/minecraft/a/a/d/c; getMaterial
