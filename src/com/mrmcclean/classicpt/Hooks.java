@@ -32,7 +32,11 @@ public final class Hooks {
     /** Each frame, before Display.update (menus too). */
     public static void frame(Object owner) {
         try {
-            if (setup(owner)) { Test.frame(); Museum.frame(game); }
+            if (setup(owner)) {
+                Test.frame();
+                Museum.frame(game);
+                if (tracer.settings.frameGeneration) VkBridge.presentFrame(tracer.settings, game.width(), game.height()); // NVIDIA Frame Generation
+            }
         } catch (Throwable t) {
             log("frame hook: " + t);
         }
@@ -79,7 +83,7 @@ public final class Hooks {
 
     static void toggle() {
         enabled = !enabled;
-        if (enabled) tracer.resetHistory();
+        if (enabled) { tracer.resetHistory(); tracer.rrFailed = false; } // Ray Reconstruction gets another try
         say("Path tracer: " + (enabled ? "ON" : "OFF") + (tracer.failed ? " (" + tracer.status + ")" : ""));
     }
 

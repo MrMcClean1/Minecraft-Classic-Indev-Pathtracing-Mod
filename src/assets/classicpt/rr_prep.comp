@@ -1,0 +1,62 @@
+#version 430
+// Classic PT, NVIDIA DLSS Ray Reconstruction: what it takes in place of the tracer's own denoiser (temporal.comp and
+// atrous.comp are skipped on these frames). From trace.comp's pictures:
+//   the noisy HDR picture: the light with the Look (as compose.comp does it) times the texture colour, not exposed;
+//   the diffuse albedo; the world normal with roughness in w; the specular albedo (the other tracers' rr_guides.comp).
+// Classic's blocks are all rough (no mirror rays but water's): roughness 1 and no specular albedo, water roughness 0
+// and reflectance 0.02.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba16f, binding = 0) uniform readonly image2D uLight;
+layout(rgba8,   binding = 1) uniform readonly image2D uAlbedo;        // sqrt of the colour, a = 0 water
+layout(rgba16f, binding = 2) uniform readonly image2D uGeom;          // normal, distance (< 0 for sky)
+layout(rgba16f, binding = 3) uniform writeonly image2D outHdr;
+layout(rgba16f, binding = 4) uniform writeonly image2D outDiffuse;
+layout(rgba16f, binding = 5) uniform writeonly image2D outNormalRough;
+layout(rgba16f, binding = 6) uniform writeonly image2D outSpecular;
+
+uniform ivec2 uRes;
+uniform vec3  uFwd, uRight, uUp;
+uniform float uTan, uAspect;
+uniform vec2  uJitter;
+uniform int   uLook;   // 0 Beta, 1 Traced, 2 Realistic (compose.comp)
+
+// NVIDIA's DLSS-RR guide, 4.2.1: the specular albedo of a surface with reflectance f0 and GGX alpha a seen at n.v
+// (as rr_guides.comp in the other tracers)
+vec3 envBrdfApprox(vec3 f0, float a, float nov) {
+    nov = abs(nov);
+    vec4 x = vec4(1.0, nov, nov * nov, nov * nov * nov);
+    vec4 y = vec4(1.0, a, a * a, a * a * a);
+    vec2 m1 = vec2(dot(vec2(0.99044, -1.28514), x.xy), dot(vec2(1.29678, -0.755907), x.xy));
+    vec3 m2 = vec3(dot(vec3(1.0, 2.92338, 59.4188), x.xyw), dot(vec3(20.3225, -27.0302, 222.592), x.xyw), dot(vec3(121.563, 626.13, 316.627), x.xyw));
+    vec2 m3 = vec2(dot(vec2(0.0365463, 3.32707), x.xy), dot(vec2(9.0632, -9.04756), x.xy));
+    vec3 m4 = vec3(dot(vec3(1.0, 3.59685, -1.36772), x.xzw), dot(vec3(9.04401, -16.3174, 9.22949), x.xzw), dot(vec3(5.56589, 19.7886, -20.2123), x.xzw));
+    float bias = dot(m1, y.xy) / dot(m2, y.xyw);
+    float scale = dot(m3, y.xy) / dot(m4, y.xyw);
+    bias *= clamp(f0.g * 50.0, 0.0, 1.0);
+    return f0 * max(0.0, scale) + max(0.0, bias);
+}
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= uRes.x || px.y >= uRes.y) return;
+    vec4 a = imageLoad(uAlbedo, px);
+    vec3 alb = a.rgb * a.rgb;
+    bool water = a.a < 0.5;
+    vec3 c = imageLoad(uLight, px).rgb;
+    if (uLook == 0) c = c * 0.8 + 0.35 * dot(c, vec3(0.333)) + 0.08;
+    else if (uLook == 2) c = pow(c, vec3(1.15));
+    imageStore(outHdr, px, vec4(c * alb, 1.0));
+    imageStore(outDiffuse, px, vec4(alb, 1.0));
+    vec4 g = imageLoad(uGeom, px);
+    bool surface = g.w >= 0.0;
+    vec3 n = surface && dot(g.xyz, g.xyz) > 0.5 ? normalize(g.xyz) : vec3(0.0, 1.0, 0.0);
+    float rough = water ? 0.0 : 1.0;
+    imageStore(outNormalRough, px, vec4(n, rough));
+    vec3 spec = vec3(0.0);
+    if (surface && water) {
+        vec2 ndc = (vec2(px) + 0.5 + uJitter) / vec2(uRes) * 2.0 - 1.0;
+        vec3 d = normalize(uFwd + ndc.x * uTan * uAspect * uRight + ndc.y * uTan * uUp);
+        spec = envBrdfApprox(vec3(0.02), 0.0, dot(n, -d));
+    }
+    imageStore(outSpecular, px, vec4(spec, 1.0));
+}

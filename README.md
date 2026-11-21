@@ -12,6 +12,17 @@ sunlight and its shadows, light from torches, fire and lava, two bounces of ligh
 leaves and glass, plants, slabs, torches, water that reflects and refracts, the water and ground around the map.
 Frames add up while the view stays still.
 
+## NVIDIA RTX (opt-in)
+
+On an RTX card, as in the Alpha, Beta and Tekkit tracers, all off by default and set in `.minecraft\classicpt.properties`
+(these versions have no mod menu): `upscaler=dlss` (DLSS super resolution, its mode from `renderScale`: 1 DLAA,
+0.67 Quality, 0.58 Balanced, 0.5 Performance, lower Ultra Performance), `rayReconstruction=true` (with DLSS:
+NVIDIA's denoiser replaces the tracer's own), `frameGeneration=true` (with DLSS), `lowLatency=2` (Reflex).
+They need NVIDIA's Streamline DLLs in `.minecraft\betapt-nvidia` (the same folder and files as the other tracers;
+NVIDIA's files, not in this repo). The tracer stays OpenGL: its pictures go to a small Vulkan side (`vk/`, LWJGL 3
+in a class loader of its own, packed into the jar) through memory both APIs share, Streamline runs there, and the
+result comes back as an OpenGL texture.
+
 ## No loader, no other mods
 
 Both versions run through MCPHackers LaunchWrapper in MultiMC. Classic PT is a LaunchWrapper tweak
@@ -33,7 +44,9 @@ Needs OpenGL 4.3 (compute shaders). The instances run Java 8.
 An empty file `.minecraft\classicpt-test\run` arms one launch. The test needs no input and never takes the mouse
 (it runs behind other windows): Indev makes a small level from its title screen; then it takes the game's own
 picture, turns the tracer on, lets it add up and takes the traced one, places a block and checks it reaches the
-GPU, and checks the toggle. Report and pictures in `classicpt-test\<date>\`, then the game closes.
+GPU, and checks the toggle. With the word `rtx` in the run file it then runs DLSS (Performance) and Ray
+Reconstruction and checks each against the native traced picture (`dlss.png`, `rr.png`). Report and pictures in
+`classicpt-test\<date>\`, then the game closes.
 
 ## Where things are in the games (javap)
 

@@ -21,6 +21,12 @@ import java.util.*;
  *   trace.comp (path tracing) -> temporal.comp (adds frames up) -> atrous.comp (spatial filter) -> compose.comp.
  * The denoiser follows the Alpha/Beta tracers' (OFF: frames added up only; Standard: + 3 filter passes;
  * Advanced: + firefly cut, 5 passes, brightness-aware). Needs OpenGL 4.3 (compute shaders).
+ *
+ * NVIDIA RTX (opt-in, classicpt.properties, see Settings): with DLSS the trace is nudged by a different fraction of
+ * a pixel each frame, dlss_inputs.comp makes depth and motion, and the composed picture goes to DLSS on the Vulkan
+ * side (VkBridge) at a render size DLSS picks, coming back window sized. With Ray Reconstruction the own denoiser is
+ * skipped: rr_prep.comp hands NVIDIA's denoiser the noisy HDR picture and its guides, tonemap.comp finishes its
+ * window-sized result. Either one failing falls back to the plain path on the same frame.
  */
 final class Tracer {
     // shapes (trace.comp)
@@ -31,8 +37,15 @@ final class Tracer {
     final Settings settings = new Settings();
     boolean ok, failed;
     String status = "not started";
-    private int prog, progTemporal, progAtrous, progCompose, worldTex, atlasTex, cloudsTex, infoBuf, lightBuf;
+    private int prog, progTemporal, progAtrous, progCompose, progInputs, progRrPrep, progTonemap, worldTex, atlasTex, cloudsTex, infoBuf, lightBuf;
     private int lightTex, albedoTex, outTex;
+    // NVIDIA: DLSS's depth and motion, Ray Reconstruction's inputs (render size) and its tone-mapped result (window size)
+    private int depthTex, motionTex, rrHdr, rrDiffuse, rrNormal, rrSpecular, rrOut, rrOutW, rrOutH;
+    private static final float NEAR = 0.05f;
+    private int jitterFrame;
+    private float jitX, jitY;
+    boolean dlssActive, rrActive, rrFailed; // what made the last frame's picture; RR off after it refused (until F7)
+    int dlssFrames, rrFrames;              // frames DLSS / Ray Reconstruction made
     private final int[] geomTex = new int[2], accumTex = new int[2], tmpTex = new int[2];
     private int outW, outH, frame, history, cur;
     private boolean historyValid;
@@ -65,6 +78,9 @@ final class Tracer {
             progTemporal = program("temporal");
             progAtrous = program("atrous");
             progCompose = program("compose");
+            progInputs = program("dlss_inputs");
+            progRrPrep = program("rr_prep");
+            progTonemap = program("tonemap");
             atlasTex = loadTexture("/terrain.png", false);
             cloudsTex = loadTexture("/clouds.png", true);
             infoBuf = blockTable();
@@ -282,11 +298,18 @@ final class Tracer {
         if (w == outW && h == outH && outTex != 0) return;
         if (outTex != 0) {
             GL11.glDeleteTextures(lightTex); GL11.glDeleteTextures(albedoTex); GL11.glDeleteTextures(outTex);
+            for (int t : new int[]{depthTex, motionTex, rrHdr, rrDiffuse, rrNormal, rrSpecular}) GL11.glDeleteTextures(t);
             for (int i = 0; i < 2; i++) { GL11.glDeleteTextures(geomTex[i]); GL11.glDeleteTextures(accumTex[i]); GL11.glDeleteTextures(tmpTex[i]); }
         }
         lightTex = texture(w, h, GL30.GL_RGBA16F, false);
         albedoTex = texture(w, h, GL11.GL_RGBA8, false);
         outTex = texture(w, h, GL11.GL_RGBA8, true);
+        depthTex = texture(w, h, GL30.GL_R32F, false);
+        motionTex = texture(w, h, GL30.GL_RG16F, false);
+        rrHdr = texture(w, h, GL30.GL_RGBA16F, false);
+        rrDiffuse = texture(w, h, GL30.GL_RGBA16F, false);
+        rrNormal = texture(w, h, GL30.GL_RGBA16F, false);
+        rrSpecular = texture(w, h, GL30.GL_RGBA16F, false);
         for (int i = 0; i < 2; i++) {
             geomTex[i] = texture(w, h, GL30.GL_RGBA16F, false);
             accumTex[i] = texture(w, h, GL30.GL_RGBA16F, false);
@@ -314,8 +337,19 @@ final class Tracer {
         int w = g.width(), h = g.height();
         if (w <= 0 || h <= 0) return false;
         Settings st = settings;
+        boolean nvUp = VkBridge.wanted(st) && VkBridge.ensure(st);
+        boolean dlssFrame = nvUp && st.upscaler == Settings.UPSCALER_DLSS && !photo && st.view == 0 && VkBridge.dlssReady();
+        boolean rrFrame = dlssFrame && st.rayReconstruction && !rrFailed && VkBridge.rrReady();
         int tw = Math.max(16, Math.round(w * st.renderScale)), th = Math.max(16, Math.round(h * st.renderScale));
+        if (dlssFrame) { // DLSS takes render sizes in a range per mode
+            int[] ds = nvSizes(rrFrame, w, h);
+            if (ds != null && ds[2] > 0 && ds[4] > 0) { tw = Math.max(ds[2], Math.min(ds[4], tw)); th = Math.max(ds[3], Math.min(ds[5], th)); }
+        }
         targets(tw, th);
+        if ((st.lowLatency == 2 || st.frameGeneration) && VkBridge.reflexOn()) { VkBridge.reflexFrame(0); VkBridge.reflexFrame(1); VkBridge.reflexFrame(2); }
+        else if (st.lowLatency >= 1) GL11.glFinish(); // low latency: no frame waits in line
+        if (dlssFrame) { jitterFrame++; jitX = halton(jitterFrame, 2, tw, w) - 0.5f; jitY = halton(jitterFrame, 3, tw, w) - 0.5f; }
+        else { jitX = 0f; jitY = 0f; }
 
         // camera (Classic and Indev: pitch down is positive, yaw turns from -z toward +x)
         double yaw = Math.toRadians(v[3]), pitch = Math.toRadians(v[4]);
@@ -323,6 +357,8 @@ final class Tracer {
         float rx = (float) Math.cos(yaw), rz = (float) Math.sin(yaw);
         float ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;  // right x forward
         float[] camNow = {v[0], v[1], v[2], fx, fy, fz, rx, 0, rz, ux, uy, uz};
+        boolean nvReset = !historyValid || prevCam == null
+                || Math.abs(camNow[0] - prevCam[0]) + Math.abs(camNow[1] - prevCam[1]) + Math.abs(camNow[2] - prevCam[2]) > 8f;
         if (photo && prevCam != null && !Arrays.equals(prevCam, camNow)) { photo = false; Hooks.say("Photo cancelled: the view moved"); }
         float tan = (float) Math.tan(Math.toRadians(70) / 2), aspect = tw / (float) th;
         int gx = (tw + 7) / 8, gy = (th + 7) / 8;
@@ -356,6 +392,8 @@ final class Tracer {
         GL20.glUniform1f(loc(prog, "uFogEnd"), st.fogDistance);
         float held = st.heldLight && g.holdingTorch() ? 1f : 0f;
         GL20.glUniform4f(loc(prog, "uHeld"), v[0] + rx * 0.4f, v[1] - 0.3f, v[2] + rz * 0.4f, held);
+        GL20.glUniform2f(loc(prog, "uJitter"), jitX, jitY);
+        GL20.glUniform1i(loc(prog, "uPointSample"), dlssFrame ? 1 : 0);
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
         GL11.glBindTexture(GL12.GL_TEXTURE_3D, worldTex);
         GL13.glActiveTexture(GL13.GL_TEXTURE1);
@@ -370,10 +408,24 @@ final class Tracer {
         GL43.glDispatchCompute(gx, gy, 1);
         barrier();
 
+        float[] pc = prevCam == null ? camNow : prevCam;
+        dlssActive = rrActive = false;
+        if (dlssFrame) dlssInputs(camNow, pc, tan, aspect, tw, th, gx, gy);
+        if (rrFrame) {
+            if (rayReconstruct(camNow, tan, aspect, tw, th, w, h, gx, gy, nvReset)) {
+                rrActive = dlssActive = true;
+                rrFrames++;
+                finishFrame(rrOut, w, h, camNow, t0);
+                return true;
+            }
+            rrFailed = true; // the own denoiser from now on (F7 tries again), this frame too
+            historyValid = false;
+            Hooks.log("Ray Reconstruction failed, back to the path tracer's own denoiser: " + VkBridge.status);
+        }
+
         // 2. temporal
         GL20.glUseProgram(progTemporal);
         camera(progTemporal, camNow, tan, aspect, tw, th);
-        float[] pc = prevCam == null ? camNow : prevCam;
         GL20.glUniform3f(loc(progTemporal, "uPrevCam"), pc[0], pc[1], pc[2]);
         GL20.glUniform3f(loc(progTemporal, "uPrevFwd"), pc[3], pc[4], pc[5]);
         GL20.glUniform3f(loc(progTemporal, "uPrevRight"), pc[6], pc[7], pc[8]);
@@ -419,20 +471,117 @@ final class Tracer {
         GL43.glDispatchCompute(gx, gy, 1);
         GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT | GL42.GL_TEXTURE_UPDATE_BARRIER_BIT);
 
+        int shown = outTex;
+        if (dlssFrame) {
+            int t = VkBridge.dlss(outTex, depthTex, motionTex, tw, th, w, h, dlssMode(), nvCamera(camNow, tan), nvReset);
+            if (t != 0) { shown = t; dlssActive = true; dlssFrames++; }
+        }
+        finishFrame(shown, w, h, camNow, t0);
+        if (photo && history >= 512) savePhoto(tw, th);
+        return true;
+    }
+
+    /** Puts the game's GL state back, draws the picture, counts the frame. */
+    private void finishFrame(int tex, int w, int h, float[] camNow, long t0) {
         GL20.glUseProgram(0);
+        for (int u = 0; u < 8; u++) GL42.glBindImageTexture(u, 0, 0, false, 0, GL15.GL_READ_ONLY, GL11.GL_RGBA8);
         GL13.glActiveTexture(GL13.GL_TEXTURE2);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
         GL13.glActiveTexture(GL13.GL_TEXTURE1);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
         GL11.glBindTexture(GL12.GL_TEXTURE_3D, 0);
-        draw(w, h);
+        if ((settings.lowLatency == 2 || settings.frameGeneration) && VkBridge.reflexOn()) VkBridge.reflexFrame(3); // Reflex: the frame's commands are handed over
+        draw(tex, w, h);
         prevCam = camNow;
         historyValid = true;
         frame++;
         history++;
-        if (photo && history >= 512) savePhoto(tw, th);
         lastMs = (System.nanoTime() - t0) / 1e6;
+    }
+
+    // ---------------------------------------------------------------- NVIDIA (VkBridge)
+
+    /** DLSS's mode from the render scale, as the other tracers: DLAA at 100%, then Quality, Balanced, Performance, Ultra Performance. */
+    int dlssMode() {
+        float s = settings.renderScale;
+        return s >= 0.99f ? 6 : s >= 0.64f ? 3 : s >= 0.55f ? 2 : s >= 0.45f ? 1 : 4;
+    }
+
+    private int[] sizeCache;
+    private String sizeKey;
+
+    private int[] nvSizes(boolean rr, int w, int h) {
+        String key = rr + "," + dlssMode() + "," + w + "," + h;
+        if (!key.equals(sizeKey)) { sizeCache = rr ? VkBridge.rrSizes(dlssMode(), w, h) : VkBridge.dlssSizes(dlssMode(), w, h); sizeKey = key; }
+        return sizeCache;
+    }
+
+    /** Halton(index, base) in 0..1, repeating over DLSS's recommended phase count (8 x the upscale squared). */
+    private static float halton(int index, int base, int renderW, int outW) {
+        float r = outW / (float) Math.max(1, renderW);
+        int n = Math.max(8, (int) Math.ceil(8 * r * r));
+        int i = index % n + 1;
+        float f = 1, x = 0;
+        while (i > 0) { f /= base; x += f * (i % base); i /= base; }
+        return x;
+    }
+
+    /** jitter x, y in pixels, tan(half fov y), near, camera position, forward, right, up (VkNv.dlss). */
+    private float[] nvCamera(float[] c, float tan) {
+        return new float[]{jitX, jitY, tan, NEAR, c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9], c[10], c[11]};
+    }
+
+    private void dlssInputs(float[] c, float[] pc, float tan, float aspect, int tw, int th, int gx, int gy) {
+        GL20.glUseProgram(progInputs);
+        camera(progInputs, c, tan, aspect, tw, th);
+        GL20.glUniform2f(loc(progInputs, "uJitter"), jitX, jitY);
+        GL20.glUniform3f(loc(progInputs, "uPrevFwd"), pc[3], pc[4], pc[5]);
+        GL20.glUniform3f(loc(progInputs, "uPrevRight"), pc[6], pc[7], pc[8]);
+        GL20.glUniform3f(loc(progInputs, "uPrevUp"), pc[9], pc[10], pc[11]);
+        GL20.glUniform3f(loc(progInputs, "uEyeDelta"), c[0] - pc[0], c[1] - pc[1], c[2] - pc[2]);
+        GL20.glUniform1f(loc(progInputs, "uNear"), NEAR);
+        image(0, geomTex[cur], GL15.GL_READ_ONLY, GL30.GL_RGBA16F);
+        image(1, depthTex, GL15.GL_WRITE_ONLY, GL30.GL_R32F);
+        image(2, motionTex, GL15.GL_WRITE_ONLY, GL30.GL_RG16F);
+        GL43.glDispatchCompute(gx, gy, 1);
+        GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_UPDATE_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT);
+    }
+
+    /** Ray Reconstruction denoises and upscales; the result is tone mapped into rrOut. False if it refused. */
+    private boolean rayReconstruct(float[] c, float tan, float aspect, int tw, int th, int w, int h, int gx, int gy, boolean reset) {
+        Settings st = settings;
+        GL20.glUseProgram(progRrPrep);
+        camera(progRrPrep, c, tan, aspect, tw, th);
+        GL20.glUniform2f(loc(progRrPrep, "uJitter"), jitX, jitY);
+        GL20.glUniform1i(loc(progRrPrep, "uLook"), st.look);
+        image(0, lightTex, GL15.GL_READ_ONLY, GL30.GL_RGBA16F);
+        image(1, albedoTex, GL15.GL_READ_ONLY, GL11.GL_RGBA8);
+        image(2, geomTex[cur], GL15.GL_READ_ONLY, GL30.GL_RGBA16F);
+        image(3, rrHdr, GL15.GL_WRITE_ONLY, GL30.GL_RGBA16F);
+        image(4, rrDiffuse, GL15.GL_WRITE_ONLY, GL30.GL_RGBA16F);
+        image(5, rrNormal, GL15.GL_WRITE_ONLY, GL30.GL_RGBA16F);
+        image(6, rrSpecular, GL15.GL_WRITE_ONLY, GL30.GL_RGBA16F);
+        GL43.glDispatchCompute(gx, gy, 1);
+        GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_UPDATE_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT);
+        for (int u = 0; u < 7; u++) GL42.glBindImageTexture(u, 0, 0, false, 0, GL15.GL_READ_ONLY, GL11.GL_RGBA8);
+        int t = VkBridge.dlssRR(rrHdr, depthTex, motionTex, rrDiffuse, rrSpecular, rrNormal, tw, th, w, h, dlssMode(), nvCamera(c, tan), reset);
+        if (t == 0) return false;
+        if (rrOut == 0 || rrOutW != w || rrOutH != h) {
+            if (rrOut != 0) GL11.glDeleteTextures(rrOut);
+            rrOut = texture(w, h, GL11.GL_RGBA8, true);
+            rrOutW = w; rrOutH = h;
+        }
+        GL20.glUseProgram(progTonemap);
+        GL20.glUniform2i(loc(progTonemap, "uRes"), w, h);
+        GL20.glUniform1f(loc(progTonemap, "uExposure"), 0.5f);
+        GL20.glUniform1f(loc(progTonemap, "uBrightness"), st.brightness);
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, t);
+        image(0, rrOut, GL15.GL_WRITE_ONLY, GL11.GL_RGBA8);
+        GL43.glDispatchCompute((w + 7) / 8, (h + 7) / 8, 1);
+        GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
         return true;
     }
 
@@ -481,7 +630,7 @@ final class Tracer {
     }
 
     /** The traced picture over the whole window (scaled up if the render scale is under 1), the game's GL state kept. */
-    private void draw(int w, int h) {
+    private void draw(int tex, int w, int h) {
         GL11.glPushAttrib(GL11.GL_ALL_ATTRIB_BITS);
         GL11.glMatrixMode(GL11.GL_PROJECTION);
         GL11.glPushMatrix();
@@ -500,7 +649,7 @@ final class Tracer {
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
         GL11.glEnable(GL11.GL_TEXTURE_2D);
         GL11.glColor4f(1, 1, 1, 1);
-        GL11.glBindTexture(GL11.GL_TEXTURE_2D, outTex);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, tex);
         GL11.glBegin(GL11.GL_QUADS);
         GL11.glTexCoord2f(0, 0); GL11.glVertex2f(0, 0);
         GL11.glTexCoord2f(1, 0); GL11.glVertex2f(1, 0);
@@ -516,6 +665,7 @@ final class Tracer {
     }
 
     void resetHistory() { history = 0; historyValid = false; }
+    String renderSize() { return outW + " x " + outH + " to " + g.width() + " x " + g.height(); }
     int history() { return history; }
 
     private static int loc(int p, String n) { return GL20.glGetUniformLocation(p, n); }

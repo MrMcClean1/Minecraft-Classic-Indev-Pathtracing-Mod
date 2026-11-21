@@ -1,0 +1,45 @@
+#version 430
+// Classic PT, NVIDIA DLSS: the depth and motion vectors DLSS (and Ray Reconstruction) take besides the colour, from how
+// far each pixel's camera ray went (trace.comp's geometry picture). The other tracers' fsr_inputs.comp without mobs:
+//   depth:  1 - near / (distance along the view axis): 0 at the camera, 1 infinitely far (the sky);
+//   motion: where this pixel's point was on screen last frame, minus where it is now, in screen fractions.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(rgba16f, binding = 0) uniform readonly image2D uGeom;     // normal, distance (< 0 for sky)
+layout(r32f,    binding = 1) uniform writeonly image2D outDepth;
+layout(rg16f,   binding = 2) uniform writeonly image2D outMotion;
+
+uniform ivec2 uRes;
+uniform vec3  uFwd, uRight, uUp;
+uniform float uTan, uAspect;
+uniform vec2  uJitter;          // this frame's sub-pixel nudge, pixels
+uniform vec3  uPrevFwd, uPrevRight, uPrevUp;
+uniform vec3  uEyeDelta;        // this frame's eye position minus last frame's
+uniform float uNear;
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= uRes.x || px.y >= uRes.y) return;
+    vec2 uv = (vec2(px) + 0.5 + uJitter) / vec2(uRes);
+    vec2 ndc = uv * 2.0 - 1.0;
+    vec3 d = normalize(uFwd + ndc.x * uTan * uAspect * uRight + ndc.y * uTan * uUp);
+    float t = imageLoad(uGeom, px).w;
+
+    vec3 prevPos;  // relative to last frame's eye
+    float depth;
+    if (t < 0.0) {
+        prevPos = d;                       // sky: a direction, so only turning moves it
+        depth = 1.0;
+    } else {
+        prevPos = d * t + uEyeDelta;
+        float z = t * dot(d, uFwd);
+        depth = clamp(1.0 - uNear / max(z, uNear), 0.0, 1.0);
+    }
+    vec2 motion = vec2(0.0);
+    float pz = dot(prevPos, uPrevFwd);
+    if (pz > 1e-4) {
+        vec2 pndc = vec2(dot(prevPos, uPrevRight) / (pz * uTan * uAspect), dot(prevPos, uPrevUp) / (pz * uTan));
+        motion = (pndc * 0.5 + 0.5) - uv;
+    }
+    imageStore(outDepth, px, vec4(depth));
+    imageStore(outMotion, px, vec4(motion, 0.0, 0.0));
+}

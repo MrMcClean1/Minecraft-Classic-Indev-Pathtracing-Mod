@@ -1,0 +1,18 @@
+#version 430
+// Classic PT, after DLSS Ray Reconstruction: its denoised, window-sized HDR picture exposed and tone mapped as
+// compose.comp does it (the Look and the texture colour are already in, rr_prep.comp).
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D uHdr;
+layout(rgba8, binding = 0) uniform writeonly image2D outImage;
+
+uniform ivec2 uRes;
+uniform float uExposure, uBrightness;
+
+vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+
+void main() {
+    ivec2 px = ivec2(gl_GlobalInvocationID.xy);
+    if (px.x >= uRes.x || px.y >= uRes.y) return;
+    vec3 c = max(texelFetch(uHdr, px, 0).rgb, vec3(0.0)) * uExposure * uBrightness;
+    imageStore(outImage, px, vec4(pow(aces(c), vec3(1.0 / 2.2)), 1.0));
+}

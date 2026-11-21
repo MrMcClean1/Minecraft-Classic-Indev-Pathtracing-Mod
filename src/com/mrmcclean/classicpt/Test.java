@@ -24,6 +24,8 @@ import java.util.List;
  *  - checks: OpenGL 4.3, the shader, the level copy on the GPU, a traced picture with detail and sane brightness,
  *    colours that agree with the game's picture (a 16 x 9 grid of hues; shadows and light differ on purpose), the
  *    F7 toggle, and that a placed block reaches the GPU;
+ *  - with the word rtx in the run file: NVIDIA DLSS super resolution (Performance, half size up to the window), then
+ *    Ray Reconstruction, each checked against the native traced picture (dlss.png, rr.png);
  *  - writes classicpt-test/<date>/report.txt, game.png, traced.png, compare.png, then closes the game.
  */
 final class Test {
@@ -34,7 +36,13 @@ final class Test {
     private static int frames, stage, wait, tracedFrames;
     private static boolean generated;
     private static double msSum;
-    private static BufferedImage game, traced, colours, afterBlock;
+    private static BufferedImage game, traced, colours, afterBlock, dlssPic, rrPic;
+    private static boolean rtx;
+    private static int dlssDone, rrDone;
+    private static String dlssSize = "", rrSize = "", nvAfterDlss = "", nvAfterRr = "";
+    private static float keptScale;
+    private static int keptUpscaler;
+    private static boolean keptRr;
     private static final List<String> lines = new ArrayList<String>();
     private static int passed, failed;
     private static int[] placed;
@@ -50,7 +58,8 @@ final class Test {
         if (!run.delete()) return;
         if (Museum.start(words)) return; // export / museum runs (the history museum)
         on = true;
-        Hooks.log("test armed: " + g.name);
+        rtx = words.toLowerCase().contains("rtx");
+        Hooks.log("test armed: " + g.name + (rtx ? " (with NVIDIA DLSS and Ray Reconstruction)" : ""));
     }
 
     private static void check(boolean ok, String what) {
@@ -111,7 +120,34 @@ final class Test {
                 break;
             }
             case 4:
-                if (++wait > 60) { afterBlock = grab(); finish(null); }
+                if (++wait > 60) {
+                    afterBlock = grab();
+                    if (!rtx) { finish(null); break; }
+                    Settings s = t.settings; // in memory only, put back before the report
+                    keptScale = s.renderScale; keptUpscaler = s.upscaler; keptRr = s.rayReconstruction;
+                    s.upscaler = Settings.UPSCALER_DLSS; s.renderScale = 0.5f; s.rayReconstruction = false;
+                    t.resetHistory();
+                    stage = 10; wait = 0;
+                }
+                break;
+            case 10: // DLSS super resolution: 60 frames it made
+                if (t.dlssActive && t.dlssFrames >= 60 || ++wait > 900 || VkBridge.failed()) {
+                    if (t.dlssActive) dlssPic = grab();
+                    dlssDone = t.dlssFrames; dlssSize = t.renderSize(); nvAfterDlss = VkBridge.status;
+                    t.settings.rayReconstruction = true;
+                    t.resetHistory();
+                    stage = 11; wait = 0;
+                }
+                break;
+            case 11: // Ray Reconstruction: 90 frames it made
+                if (t.rrActive && t.rrFrames >= 90 || ++wait > 900 || VkBridge.failed() || t.rrFailed) {
+                    if (t.rrActive) rrPic = grab();
+                    rrDone = t.rrFrames; rrSize = t.renderSize(); nvAfterRr = VkBridge.status;
+                    Settings s = t.settings;
+                    s.renderScale = keptScale; s.upscaler = keptUpscaler; s.rayReconstruction = keptRr;
+                    t.resetHistory();
+                    finish(null);
+                }
                 break;
             default:
                 break;
@@ -168,6 +204,16 @@ final class Test {
         return new double[]{r / s, gg / s};
     }
 
+    /** An NVIDIA picture against the native traced one of the same view (afterBlock): detail, brightness, colours. */
+    private static void rtxPicture(BufferedImage p, String what) {
+        if (p == null || afterBlock == null) return;
+        double[] sp = stats(p), sn = stats(afterBlock);
+        double h = hueAgreement(afterBlock, p);
+        note(String.format("%s picture: mean %.0f (native %.0f), spread %.0f (native %.0f), colours agree in %.0f%%", what, sp[0], sn[0], sp[1], sn[1], h * 100));
+        check(sp[1] > 8 && Math.abs(sp[0] - sn[0]) < 0.25 * sn[0] + 8, what + "'s picture matches the native one's brightness and has detail");
+        check(h >= 0.7, String.format("%s: colours agree with the native traced picture in %.0f%% of the grid (70%% needed)", what, h * 100));
+    }
+
     private static void finish(String why) {
         if (done) return;
         Tracer t = Hooks.tracer;
@@ -195,6 +241,14 @@ final class Test {
             check(h >= 0.6, String.format("textures: colours agree with the game's picture in %.0f%% of the grid (60%% needed)", h * 100));
             note(String.format("tracer frame time (CPU side, GPU queued) %.2f ms over %d frames, %d lights", msSum / Math.max(1, tracedFrames), tracedFrames, t.lightCount));
         } else check(false, "both pictures taken");
+        if (rtx) {
+            note("NVIDIA: " + (VkBridge.error != null ? VkBridge.error : nvAfterRr));
+            check(!VkBridge.failed(), "the Vulkan side for NVIDIA's features started" + (VkBridge.error != null ? ": " + VkBridge.error : ""));
+            check(dlssDone >= 60 && dlssPic != null, "DLSS super resolution made " + dlssDone + " frames (Performance, " + dlssSize + "; " + nvAfterDlss + ")");
+            rtxPicture(dlssPic, "DLSS");
+            check(rrDone >= 90 && rrPic != null, "Ray Reconstruction made " + rrDone + " frames (" + rrSize + ")" + (t.rrFailed ? ", then refused: " + nvAfterRr : ""));
+            rtxPicture(rrPic, "Ray Reconstruction");
+        }
         boolean before = Hooks.enabled;
         Hooks.toggle();
         boolean flipped = Hooks.enabled != before;
@@ -207,6 +261,8 @@ final class Test {
             if (traced != null) ImageIO.write(traced, "png", new File(dir, "traced.png"));
             if (afterBlock != null) ImageIO.write(afterBlock, "png", new File(dir, "traced-with-block.png"));
             if (colours != null) ImageIO.write(colours, "png", new File(dir, "colours-view.png"));
+            if (dlssPic != null) ImageIO.write(dlssPic, "png", new File(dir, "dlss.png"));
+            if (rrPic != null) ImageIO.write(rrPic, "png", new File(dir, "rr.png"));
             if (game != null && traced != null) {
                 BufferedImage c = new BufferedImage(game.getWidth(), game.getHeight() * 2, BufferedImage.TYPE_INT_RGB);
                 c.getGraphics().drawImage(game, 0, 0, null);

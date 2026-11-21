@@ -12,18 +12,25 @@ import java.util.Properties;
  *   Realistic), F6 photo mode, Home the view (path traced, colours, normals, light).
  * The file also holds what has no key here: bounces, render scale, brightness, reflections, cloud shadows, fog
  * distance and the effects (waving plants, water waves, clouds). These old versions have no mod menu.
+ * NVIDIA RTX (as the other tracers' Effects > NVIDIA RTX, all off by default, an RTX card and the DLLs in
+ * .minecraft/betapt-nvidia needed): upscaler=dlss (DLSS super resolution; its mode from renderScale: 1 DLAA, 0.67
+ * Quality, 0.58 Balanced, 0.5 Performance, lower Ultra Performance), rayReconstruction (needs DLSS; replaces the
+ * denoiser), frameGeneration (needs DLSS), lowLatency 0 off / 1 on / 2 NVIDIA Reflex.
  */
 final class Settings {
     static final String[] PRESETS = {"Fast", "Standard", "Fancy"};
     static final String[] DENOISERS = {"OFF", "Standard", "Advanced"};
     static final String[] LOOKS = {"Beta", "Traced", "Realistic"};
     static final String[] VIEWS = {"Path traced", "Colours", "Normals", "Light"};
+    static final int UPSCALER_BASIC = 0, UPSCALER_DLSS = 1;
     static final int FX_WAVING = 16, FX_WAVES = 32, FX_CLOUDS = 64; // trace.comp, the same bits as Alpha/Beta
 
     int preset = 1, denoiser = 2, look = 1, view = 0;
     int bounces = 2, samples = 2;
     float renderScale = 1f, brightness = 1f, cloudShadows = 0.55f, fogDistance = 0f;
     boolean reflections = true, waving = false, waves = true, clouds = true, heldLight = true;
+    int upscaler = UPSCALER_BASIC, lowLatency = 0;
+    boolean rayReconstruction = false, frameGeneration = false;
 
     int effects() { return (waving ? FX_WAVING : 0) | (waves ? FX_WAVES : 0) | (clouds ? FX_CLOUDS : 0); }
 
@@ -46,6 +53,9 @@ final class Settings {
         cloudShadows = f(p, "cloudShadows", cloudShadows); fogDistance = f(p, "fogDistance", fogDistance);
         reflections = b(p, "reflections", reflections); waving = b(p, "wavingPlants", waving); waves = b(p, "waterWaves", waves);
         clouds = b(p, "clouds", clouds); heldLight = b(p, "heldLight", heldLight);
+        upscaler = "dlss".equalsIgnoreCase(String.valueOf(p.getProperty("upscaler")).trim()) ? UPSCALER_DLSS : UPSCALER_BASIC;
+        lowLatency = Math.max(0, Math.min(2, i(p, "lowLatency", lowLatency)));
+        rayReconstruction = b(p, "rayReconstruction", rayReconstruction); frameGeneration = b(p, "frameGeneration", frameGeneration);
         renderScale = Math.max(0.25f, Math.min(1f, renderScale));
         bounces = Math.max(1, Math.min(4, bounces));
         samples = Math.max(1, Math.min(8, samples));
@@ -59,11 +69,14 @@ final class Settings {
         p.setProperty("cloudShadows", "" + cloudShadows); p.setProperty("fogDistance", "" + fogDistance);
         p.setProperty("reflections", "" + reflections); p.setProperty("wavingPlants", "" + waving); p.setProperty("waterWaves", "" + waves);
         p.setProperty("clouds", "" + clouds); p.setProperty("heldLight", "" + heldLight);
+        p.setProperty("upscaler", upscaler == UPSCALER_DLSS ? "dlss" : "basic"); p.setProperty("lowLatency", "" + lowLatency);
+        p.setProperty("rayReconstruction", "" + rayReconstruction); p.setProperty("frameGeneration", "" + frameGeneration);
         try {
             FileOutputStream o = new FileOutputStream(file());
             p.store(o, "Classic PT (path tracer) settings. Keys: F7 on/off, F4 preset, F9 denoiser, F10 look, F6 photo, Home view."
                     + " preset 0-2 Fast/Standard/Fancy, denoiser 0-2 OFF/Standard/Advanced, look 0-2 Beta/Traced/Realistic,"
-                    + " renderScale 0.25-1, fogDistance 0 = off");
+                    + " renderScale 0.25-1, fogDistance 0 = off; NVIDIA RTX: upscaler basic/dlss, rayReconstruction, frameGeneration,"
+                    + " lowLatency 0-2 (2 = Reflex)");
             o.close();
         } catch (Exception ignored) {
         }
