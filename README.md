@@ -48,6 +48,28 @@ GPU, and checks the toggle. With the word `rtx` in the run file it then runs DLS
 Reconstruction and checks each against the native traced picture (`dlss.png`, `rr.png`). Report and pictures in
 `classicpt-test\<date>\`, then the game closes.
 
+## Classic Bots (Indev; Classic 0.30 to come)
+
+The same bots as Alpha PT, Beta PT and the Beta modpack, in Indev 20100223: `/bot on`, `/bot spawn [name]`, then
+talk to them ("Tess follow me", "Tess bring me 16 wood", "Tess set up a base here"...). Indev has no chat, so **T**
+(or **/**) opens the bots' own chat box and their lines are drawn over the game. Bots are saved in the level
+(`.mclevel`, entity id `ClassicBot`) and come back when it loads. Settings in `.minecraft\config\classicbots.properties`.
+
+How the sources stay one set: the bots are Alpha PT's files (`bots\sync.ps1` copies them into `bots\src`, package
+renamed), compiled against the game jar renamed to Alpha's Feather names (`tools\Remap.java named` with
+`bots\indev.mappings`, hand-made from javap), then turned back to the game's own names (`Remap back`). What Indev lacks
+or keeps differently (float positions, no block metadata setter with the id, squared `distanceTo`, a block-entity
+getter that casts any block) is a `STUB` in the mappings, answered by `bots\indev\Compat.java`. The per-game files
+(`Bots`, `Names`, `BotsClient`, `IndevBot`, `Entry`, chat, `BotTest`) live in `bots\indev`. The build fails if any
+game reference doesn't resolve. Classic PT reaches the bots by reflection (`Bots.java`); `tweak\Hook` also lets the
+level loader ask for unknown entity ids.
+
+Test: an empty file `.minecraft\classicbots-test\run` arms one launch (in the background, muted, the mouse never
+taken, the player can't be hurt): makes a level, spawns a bot, orders it to follow and moves the player 12 blocks
+(the bot has to walk there, a teleport fails), saves the level with the game's own writer, reads it back (bot, owner,
+things), opens it and checks the bot runs. Report in `classicbots-test\<date>\report.txt`; an empty
+`classicbots-test\debug` adds the bots' debug log (`log.txt` while a test runs).
+
 ## Where things are in the games (javap)
 
 | | Classic 0.30 survival | Indev 20100223 |

@@ -29,8 +29,18 @@ public final class Hooks {
         return true;
     }
 
+    /** The level loader met an entity id it doesn't know: Classic Bots' bot, or null. */
+    public static Object entity(Object level, String id) {
+        try { return Bots.entity(level, id); } catch (Throwable t) { log("bots: " + t); return null; }
+    }
+
     /** Each frame, before Display.update (menus too). */
     public static void frame(Object owner) {
+        try {
+            if (setup(owner)) Bots.frame(game);
+        } catch (Throwable t) {
+            log("bots: " + t);
+        }
         try {
             if (setup(owner)) {
                 Test.frame();

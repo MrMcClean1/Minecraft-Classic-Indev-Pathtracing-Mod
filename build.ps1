@@ -43,6 +43,30 @@ New-Item -ItemType Directory -Force $vkOut | Out-Null
 & "$jdk\jar.exe" --create --file "$vkOut\classicpt-vk.bin" -C $vkClasses .
 if ($LASTEXITCODE -ne 0) { throw 'jar (vk) failed' }
 foreach ($k in $l3.Keys) { Copy-Item $l3[$k] "$vkOut\$k.bin" }
+# Classic Bots (Alpha PT's bots, shared sources in bots\src from bots\sync.ps1): compiled against the game jar with
+# Alpha's names (tools\Remap.java named + bots\<game>.mappings), then remapped back to the game's own names.
+$asm = "$lib\org\ow2\asm"
+$remapCp = (("$asm\asm\9.10.1\asm-9.10.1.jar", "$asm\asm-commons\9.10.1\asm-commons-9.10.1.jar", "$asm\asm-tree\9.10.1\asm-tree-9.10.1.jar") -join ';')
+$lwjgl2 = "$lib\org\lwjgl\lwjgl\lwjgl\2.9.4-nightly-20150209\lwjgl-2.9.4-nightly-20150209.jar"
+foreach ($g in @(@{ name = 'indev'; jar = "$lib\com\mojang\minecraft\in-20100223\minecraft-in-20100223-client.jar" })) {
+  $n = $g.name
+  $named = "$root\build\$n-named.jar"
+  & "$jdk\java.exe" -cp $remapCp "$root\tools\Remap.java" named $g.jar "$root\bots\$n.mappings" $named 2>$null
+  if ($LASTEXITCODE -ne 0) { throw "remap ($n, named) failed" }
+  $bsrc = "$root\build\bots-$n-src"; $bcls = "$root\build\bots-$n-classes"
+  Remove-Item -Recurse -Force $bsrc, $bcls -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force $bsrc, $bcls | Out-Null
+  foreach ($f in @(Get-ChildItem "$root\bots\src" -Recurse -Filter *.java) + @(Get-ChildItem "$root\bots\$n" -Filter *.java)) {
+    $t = [IO.File]::ReadAllText($f.FullName).Replace('package com.mrmcclean.classicpt.bots;', "package com.mrmcclean.classicpt.bots.$n;")
+    [IO.File]::WriteAllText("$bsrc\$($f.Name)", $t) # a per-game file of the same name replaces the shared one
+  }
+  & "$jdk\javac.exe" --release 8 -nowarn -Xlint:-options -encoding UTF-8 -cp "$named;$lwjgl2" -d $bcls (Get-ChildItem $bsrc -Filter *.java | ForEach-Object FullName)
+  if ($LASTEXITCODE -ne 0) { throw "javac (bots, $n) failed" }
+  & "$jdk\java.exe" -cp $remapCp "$root\tools\Remap.java" back $g.jar "$root\bots\$n.mappings" $bcls "com/mrmcclean/classicpt/bots/$n/Compat" 2>$null
+  if ($LASTEXITCODE -ne 0) { throw "remap ($n, back) failed" }
+  Copy-Item -Recurse "$bcls\com" "$root\build\classes\" -Force
+}
+
 $jar = "$root\build\classicpt-$Version.jar"
 & "$jdk\jar.exe" --create --file $jar -C "$root\build\classes" .
 if ($LASTEXITCODE -ne 0) { throw 'jar failed' }

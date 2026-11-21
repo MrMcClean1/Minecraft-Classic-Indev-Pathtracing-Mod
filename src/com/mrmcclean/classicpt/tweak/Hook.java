@@ -31,8 +31,39 @@ public class Hook implements Injection, Opcodes {
     @Override public String name() { return "Classic PT (path tracer hooks)"; }
     @Override public boolean required() { return false; }
 
+    /**
+     * Indev's level loader makes entities by id from a fixed list ("Skipping unknown entity id" for anything else). Classic
+     * Bots' bots are saved as "ClassicBot": ask Hooks.entity(level, id) first, and use what it returns.
+     */
+    static final String[] LOADER = {"net/minecraft/a/a/a", "a", "(Lnet/minecraft/a/a/g;Ljava/lang/String;)Lnet/minecraft/a/c/b;", "net/minecraft/a/c/b"};
+
+    private static void hookLoader(ClassNodeSource source) {
+        ClassNode cn = source.getClass(LOADER[0]);
+        if (cn == null) return;
+        for (MethodNode m : cn.methods) {
+            if (!m.name.equals(LOADER[1]) || !m.desc.equals(LOADER[2])) continue;
+            InsnList l = new InsnList();
+            LabelNode none = new LabelNode();
+            l.add(new VarInsnNode(ALOAD, 1));
+            l.add(new VarInsnNode(ALOAD, 2));
+            l.add(new MethodInsnNode(INVOKESTATIC, HOOKS, "entity", "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false));
+            l.add(new InsnNode(DUP));
+            l.add(new JumpInsnNode(IFNULL, none));
+            l.add(new TypeInsnNode(CHECKCAST, LOADER[3]));
+            l.add(new InsnNode(ARETURN));
+            l.add(none);
+            l.add(new InsnNode(POP));
+            m.instructions.insert(l);
+            m.maxStack += 2;
+            source.overrideClass(cn);
+            System.out.println("[ClassicPT] hooked the level loader's entities (Classic Bots)");
+            return;
+        }
+    }
+
     @Override
     public boolean apply(ClassNodeSource source, LaunchConfig config) {
+        hookLoader(source);
         for (String[] t : TARGETS) {
             ClassNode cn = source.getClass(t[0]);
             if (cn == null) continue;

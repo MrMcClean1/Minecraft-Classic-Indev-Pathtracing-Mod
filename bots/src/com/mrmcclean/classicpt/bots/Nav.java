@@ -1,0 +1,444 @@
+package com.mrmcclean.classicpt.bots;
+
+import net.minecraft.block.Block;
+import net.minecraft.world.World;
+
+import java.util.*;
+
+/**
+ * The bots' own path finder: A* over feet positions with costs in game ticks, in place of the mob path finder (which
+ * looked 40 blocks ahead, never dug or built and went round in circles). Moves: walk, diagonals past open corners,
+ * step up, drop (up to 3, any depth into water), swim, ladders, wooden doors, and when allowed: dig through, dig a
+ * step down, pillar up.
+ *
+ * Ideas taken from open source path finders, written fresh here:
+ * - Baritone (LGPL-3.0, ideas only): move costs as real ticks (walking 4.317 blocks/s, falls from gravity, ladders,
+ *   swimming); the path it is already on costs half (it doesn't flip between two equal routes); a weighted
+ *   heuristic; extra cost near hostile mobs; a best partial path when the goal is out of reach or unloaded.
+ * - mineflayer-pathfinder (MIT, PrismarineJS): the search runs in slices over several ticks; finished paths are
+ *   shortened to the corners a straight walk can't skip; a path is only replanned when a block on it changes.
+ */
+final class Nav {
+    // ticks per move (Baritone's figures: 20 ticks / blocks per second)
+    static final double WALK = 20 / 4.317, DIAG = WALK * Math.sqrt(2), SWIM = 20 / 2.86, LADDER_UP = 20 / 2.35, LADDER_DOWN = 20 / 3.0;
+    static final double JUMP = WALK + 2.5, PLACE = 12, DOOR = 3, MOB = 1.5, FAVOR = 0.5;
+    /** Ticks to fall n blocks, simulated with the game's gravity (0.08 a tick, 2% drag). */
+    static final double[] FALL = new double[257];
+    static {
+        double v = 0, d = 0; int t = 0, n = 1;
+        while (n < FALL.length) { v = (v - 0.08) * 0.98; d -= v; t++; while (n < FALL.length && d >= n) FALL[n++] = t; }
+    }
+
+    enum Move { WALK, DIAG, UP, DOWN, SWIM, CLIMB, DIG, DIG_DOWN, PILLAR }
+
+    /** How long breaking a block takes (ticks), negative if it may not be broken. */
+    interface Breaker { double ticks(int x, int y, int z, int id); }
+
+    static final class Path {
+        final List<int[]> points = new ArrayList<>(); // {x, y, z, move ordinal}
+        boolean complete;
+        int searched;
+        int index;
+        int[] next() { return index < points.size() ? points.get(index) : null; }
+        boolean done() { return index >= points.size(); }
+    }
+
+    private static final class Node {
+        final int x, y, z; double g, h, f; Node parent; Move move; boolean closed;
+        Node(int x, int y, int z) { this.x = x; this.y = y; this.z = z; }
+    }
+
+    private final World w;
+    private final int tx, ty, tz;
+    private final double reach2;
+    private final Breaker breaker;
+    private final int blocks;
+    private final int maxNodes;
+    private final Set<Long> favored;
+    private final List<double[]> mobs;
+    private final PriorityQueue<Node> open = new PriorityQueue<>(Comparator.comparingDouble((Node n) -> n.f));
+    private final Map<Long, Node> seen = new HashMap<>();
+    private Node best;
+    private int expanded;
+    private Path result;
+
+    /**
+     * @param breaker null: no digging. @param blocks how many blocks it may place for pillars.
+     * @param favored the path it is on now (its nodes cost half), or null. @param mobs hostile mob positions.
+     */
+    Nav(World w, int sx, int sy, int sz, int tx, int ty, int tz, double reach, Breaker breaker, int blocks, int maxNodes, Set<Long> favored, List<double[]> mobs) {
+        this.w = w; this.tx = tx; this.ty = ty; this.tz = tz; this.reach2 = reach * reach;
+        this.breaker = breaker; this.blocks = blocks; this.maxNodes = maxNodes; this.favored = favored; this.mobs = mobs;
+        Node s = new Node(sx, sy, sz);
+        s.h = h(sx, sy, sz); s.f = s.h;
+        open.add(s);
+        seen.put(key(sx, sy, sz), s);
+        best = s;
+    }
+
+    static long key(int x, int y, int z) { return ((long) (x + 30000000) << 34) | ((long) (z + 30000000) << 8) | (y & 255); }
+
+    private double h(int x, int y, int z) {
+        double dx = x - tx, dy = y - ty, dz = z - tz;
+        return Math.sqrt(dx * dx + dz * dz) * WALK + Math.abs(dy) * (dy < 0 ? JUMP : 2);
+    }
+
+    // measurements for the bot tests: plans made, nodes looked at, time spent planning
+    static int plans, partial, repairs, hits, coarse, spins, flights, lifts; static long nodes, nanos;
+    static void resetStats() { plans = partial = repairs = hits = coarse = spins = flights = lifts = 0; nodes = nanos = 0; }
+    static String stats() { return plans + " plans (" + partial + " partial, " + repairs + " repairs, " + hits + " from the cache, " + coarse + " with a region route), " + nodes + " nodes, " + nanos / 1000000 + " ms planning; odd moves: " + spins + " spins, " + flights + " long times in the air, " + lifts + " lifts out of a block"; }
+
+    // ---- recent paths (Maple / PerViamInvenire idea: keep what was worked out): the last 32 complete paths per
+    // world by goal; a new trip to the same goal starting on one of them takes the rest of it, if still walkable
+
+    private static final Map<World, LinkedHashMap<Long, List<int[]>>> CACHE = new WeakHashMap<>();
+
+    static void remember(World w, int tx, int ty, int tz, Path raw) {
+        if (raw == null || !raw.complete || raw.points.size() < 4) return;
+        for (int[] q : raw.points) if (q[3] == Move.PILLAR.ordinal() || q[3] == Move.DIG_DOWN.ordinal()) return; // they change the ground under them
+        LinkedHashMap<Long, List<int[]>> m = CACHE.computeIfAbsent(w, k -> new LinkedHashMap<Long, List<int[]>>(16, 0.75f, true) {
+            @Override protected boolean removeEldestEntry(Map.Entry<Long, List<int[]>> e) { return size() > 32; }
+        });
+        m.put(key(tx, ty, tz), new ArrayList<>(raw.points));
+    }
+
+    /** It got stuck on a remembered path: drop the paths to (about) this goal. */
+    static void forget(World w, int tx, int ty, int tz) {
+        LinkedHashMap<Long, List<int[]>> m = CACHE.get(w);
+        if (m != null) for (int ox = -1; ox <= 1; ox++) for (int oy = -1; oy <= 1; oy++) for (int oz = -1; oz <= 1; oz++) m.remove(key(tx + ox, ty + oy, tz + oz));
+    }
+
+    /** The rest of a remembered path to (about) this goal that passes the start, or null. */
+    Path cached(int sx, int sy, int sz) {
+        LinkedHashMap<Long, List<int[]>> m = CACHE.get(w);
+        if (m == null) return null;
+        for (int ox = -1; ox <= 1; ox++) for (int oy = -1; oy <= 1; oy++) for (int oz = -1; oz <= 1; oz++) {
+            List<int[]> pts = m.get(key(tx + ox, ty + oy, tz + oz));
+            if (pts == null) continue;
+            int from = -1;
+            for (int i = pts.size() - 1; i >= 0 && from < 0; i--) { int[] q = pts.get(i); if (Math.abs(q[0] - sx) <= 1 && Math.abs(q[2] - sz) <= 1 && Math.abs(q[1] - sy) <= 1) from = i + 1; }
+            if (from < 0 || from >= pts.size()) continue;
+            Path p = new Path();
+            p.complete = true;
+            for (int i = from; i < pts.size(); i++) p.points.add(pts.get(i));
+            if (!walkable(p, 0, p.points.size())) { m.remove(key(tx + ox, ty + oy, tz + oz)); continue; }
+            hits++;
+            return p;
+        }
+        return null;
+    }
+
+    // ---- a region route for long trips (HPA* idea, bevy_northstar's hpa module): the land as 8 by 8 cells, each
+    // known by its ground height and whether it is water or lava (kept a minute); A* over the cells finds the way
+    // round lakes, lava and cliffs, and the block search only plans to a waypoint about 32 blocks along it
+
+    static final int CELL = 8;
+    private static final Map<World, HashMap<Long, long[]>> LAND = new WeakHashMap<>(); // cell -> {height, kind, time}
+
+    /** {ground height, 0 land / 1 water / 2 lava / 3 unknown, time} of a cell, from its middle column. */
+    private long[] land(int cx, int cz) {
+        HashMap<Long, long[]> m = LAND.computeIfAbsent(w, k -> new HashMap<>());
+        long k = ck(cx, cz);
+        long[] c = m.get(k);
+        long now = System.currentTimeMillis();
+        if (c != null && now - c[2] < 60000) return c;
+        int x = cx * CELL + CELL / 2, z = cz * CELL + CELL / 2;
+        if (!loaded(x, 64, z)) return new long[]{-1, 3, now};
+        int y = w.getHeight(x, z);
+        while (y > 2 && (id(x, y - 1, z) == 0 || id(x, y - 1, z) == 18 || id(x, y - 1, z) == 17)) y--; // under the trees
+        int below = id(x, y - 1, z);
+        c = new long[]{y, water(below) ? 1 : lava(below) ? 2 : 0, now};
+        if (m.size() > 20000) m.clear();
+        m.put(k, c);
+        return c;
+    }
+
+    /** A waypoint about 32 blocks along a region route to the goal, or null if the goal is close or no route was found. */
+    int[] waypoint(int sx, int sy, int sz) {
+        int scx = Math.floorDiv(sx, CELL), scz = Math.floorDiv(sz, CELL), gcx = Math.floorDiv(tx, CELL), gcz = Math.floorDiv(tz, CELL);
+        if (Math.abs(scx - gcx) + Math.abs(scz - gcz) <= 4) return null;
+        int pad = 6, x0 = Math.min(scx, gcx) - pad, x1 = Math.max(scx, gcx) + pad, z0 = Math.min(scz, gcz) - pad, z1 = Math.max(scz, gcz) + pad;
+        HashMap<Long, double[]> g = new HashMap<>(); // cell -> {cost, parent x, parent z, closed}
+        PriorityQueue<double[]> q = new PriorityQueue<>(Comparator.comparingDouble((double[] a) -> a[0]));
+        g.put(ck(scx, scz), new double[]{0, Integer.MIN_VALUE, 0, 0});
+        q.add(new double[]{0, scx, scz});
+        int n = 0;
+        boolean found = false;
+        while (!q.isEmpty() && n++ < 4000) {
+            double[] c = q.poll();
+            int cx = (int) c[1], cz = (int) c[2];
+            double[] cg = g.get(ck(cx, cz));
+            if (cg[3] > 0) continue;
+            cg[3] = 1;
+            if (cx == gcx && cz == gcz) { found = true; break; }
+            long[] here = land(cx, cz);
+            for (int dx = -1; dx <= 1; dx++) for (int dz = -1; dz <= 1; dz++) {
+                int nx = cx + dx, nz = cz + dz;
+                if (dx == 0 && dz == 0 || nx < x0 || nx > x1 || nz < z0 || nz > z1) continue;
+                long[] there = land(nx, nz);
+                if (there[1] == 2) continue;
+                double step = (dx != 0 && dz != 0 ? 1.414 : 1) * CELL * WALK;
+                if (there[1] == 1) step *= SWIM / WALK * 1.5;
+                if (there[1] != 3 && here[1] != 3) { long dh = Math.abs(there[0] - here[0]); if (dh > 3) step += (dh - 3) * JUMP * 3; }
+                double ng = cg[0] + step;
+                double[] o = g.get(ck(nx, nz));
+                if (o != null && (o[3] > 0 || o[0] <= ng)) continue;
+                g.put(ck(nx, nz), new double[]{ng, cx, cz, 0});
+                double hx = nx - gcx, hz = nz - gcz;
+                q.add(new double[]{ng + Math.sqrt(hx * hx + hz * hz) * CELL * WALK, nx, nz});
+            }
+        }
+        if (!found) return null;
+        List<int[]> cells = new ArrayList<>();
+        for (int cx = gcx, cz = gcz; ; ) {
+            cells.add(0, new int[]{cx, cz});
+            double[] c = g.get(ck(cx, cz));
+            if (c[1] == Integer.MIN_VALUE) break;
+            cx = (int) c[1]; cz = (int) c[2];
+        }
+        for (int i = 0; i < cells.size() - 1; i++) {
+            int[] c = cells.get(i);
+            int x = c[0] * CELL + CELL / 2, z = c[1] * CELL + CELL / 2;
+            if (Math.sqrt((double) (x - sx) * (x - sx) + (double) (z - sz) * (z - sz)) < 32) continue;
+            long[] l = land(c[0], c[1]);
+            coarse++;
+            return new int[]{x, l[1] == 3 ? sy : (int) l[0], z};
+        }
+        return null; // the goal's own cell is next: plan to the goal itself
+    }
+
+    private static long ck(int x, int z) { return ((long) x << 32) ^ (z & 0xffffffffL); }
+
+    boolean done() { return result != null; }
+    Path result() { return result; }
+
+    /** Looks at up to n more nodes; true once finished (result() then holds the path, possibly partial, or null). */
+    boolean step(int n) {
+        if (result != null) return true;
+        long t = System.nanoTime();
+        try { return search(n); } finally { nanos += System.nanoTime() - t; }
+    }
+
+    private boolean search(int n) {
+        while (n-- > 0) {
+            Node c = open.poll();
+            if (c == null) { finish(best, false); return true; }
+            if (c.closed) continue;
+            c.closed = true;
+            double dx = c.x + 0.5 - (tx + 0.5), dy = c.y - ty, dz = c.z + 0.5 - (tz + 0.5);
+            if (dx * dx + dz * dz <= reach2 && Math.abs(dy) < 2) { finish(c, true); return true; }
+            if (c.h < best.h) best = c;
+            if (++expanded >= maxNodes) { finish(best, false); return true; }
+            expand(c);
+        }
+        return false;
+    }
+
+    private void finish(Node end, boolean complete) {
+        Path p = new Path();
+        p.complete = complete; p.searched = expanded;
+        plans++; nodes += expanded; if (!complete) partial++;
+        LinkedList<Node> chain = new LinkedList<>();
+        for (Node x = end; x != null && x.parent != null; x = x.parent) chain.addFirst(x);
+        for (Node x : chain) p.points.add(new int[]{x.x, x.y, x.z, x.move.ordinal()});
+        result = p.points.isEmpty() && !complete ? null : p;
+    }
+
+    private void add(Node from, int x, int y, int z, double cost, Move m) {
+        if (cost < 0 || y < 1 || y > 126) return;
+        long k = key(x, y, z);
+        if (favored != null && favored.contains(k)) cost *= FAVOR;
+        if (mobs != null) for (double[] mob : mobs) { double ex = mob[0] - x, ey = mob[1] - y, ez = mob[2] - z; if (ex * ex + ey * ey + ez * ez < 64) { cost *= MOB; break; } }
+        if (nearLava(x, y, z)) cost += 40;
+        Node n = seen.get(k);
+        double g = from.g + cost;
+        if (n == null) { n = new Node(x, y, z); n.h = h(x, y, z); seen.put(k, n); }
+        else if (n.closed || g >= n.g - 0.01) return; // only a real improvement reopens a node
+        n.g = g; n.f = g + n.h; n.parent = from; n.move = m;
+        open.add(n);
+    }
+
+    // ---- the world, as the bot sees it
+
+    private int id(int x, int y, int z) { return w.getBlock(x, y, z); }
+    static boolean water(int id) { return id == 8 || id == 9; }
+    static boolean lava(int id) { return id == 10 || id == 11; }
+    static boolean door(int id) { return id == 64; } // wooden: it opens them on the way
+    static boolean dangerous(int id) { return lava(id) || id == 51 || id == 81; } // lava, fire, cactus
+
+    /** A body can be in it: air, plants, torches, water, an open or wooden door. */
+    boolean passable(int x, int y, int z) {
+        int id = id(x, y, z);
+        if (id == 0 || water(id) || door(id)) return true;
+        if (lava(id) || id == 51) return false;
+        Block b = Bots.block(id);
+        return b == null || !b.material.blocksMovement();
+    }
+
+    /** Something to stand on (not a fence: it's too tall to step onto). */
+    boolean floor(int x, int y, int z) {
+        int id = id(x, y, z);
+        if (id == 0 || water(id) || lava(id) || id == 85 || door(id)) return false;
+        Block b = Bots.block(id);
+        return b != null && b.material.blocksMovement();
+    }
+
+    boolean ladder(int x, int y, int z) { return id(x, y, z) == 65; }
+
+    private boolean loaded(int x, int y, int z) { return w.isChunkLoaded(x, y, z); }
+
+    private boolean nearLava(int x, int y, int z) {
+        return lava(id(x + 1, y, z)) || lava(id(x - 1, y, z)) || lava(id(x, y, z + 1)) || lava(id(x, y, z - 1)) || lava(id(x, y - 1, z));
+    }
+
+    /** Ticks to clear these blocks (0 if clear already), negative if one can't be cleared. */
+    private double clear(int[]... ps) {
+        double t = 0;
+        for (int[] p : ps) {
+            if (passable(p[0], p[1], p[2])) continue;
+            if (breaker == null) return -1;
+            int id = id(p[0], p[1], p[2]);
+            if (dangerous(id) || water(id)) return -1;
+            int above = id(p[0], p[1] + 1, p[2]);
+            if (above == 12 || above == 13 || lava(above) || water(above)) return -1; // something would pour or fall in
+            double b = breaker.ticks(p[0], p[1], p[2], id);
+            if (b < 0) return -1;
+            t += b + 4;
+        }
+        return t;
+    }
+
+    private static final int[][] SIDES = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}, CORNERS = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+
+    private void expand(Node c) {
+        int x = c.x, y = c.y, z = c.z;
+        boolean inWater = water(id(x, y, z)), onLadder = ladder(x, y, z);
+        for (int[] s : SIDES) {
+            int nx = x + s[0], nz = z + s[1];
+            if (!loaded(nx, y, nz)) continue;
+            boolean feet = passable(nx, y, nz), head = passable(nx, y + 1, nz);
+            if (feet && head) {
+                int nid = id(nx, y, nz);
+                if (floor(nx, y - 1, nz) || water(nid) || ladder(nx, y, nz)) {
+                    if (!dangerous(id(nx, y - 1, nz))) add(c, nx, y, nz, (water(nid) ? SWIM : WALK) + (door(nid) || door(id(nx, y + 1, nz)) ? DOOR : 0), Move.WALK);
+                } else {
+                    // a drop: the first floor below, up to 3 (any depth into water)
+                    int d = 0, fy = y - 1;
+                    while (d < 64 && fy > 0 && passable(nx, fy, nz) && !water(id(nx, fy, nz))) { fy--; d++; }
+                    boolean wet = water(id(nx, fy, nz));
+                    int land = wet ? fy : fy + 1;
+                    if (d >= 1 && (d <= 3 || wet) && (wet || floor(nx, land - 1, nz)) && !dangerous(id(nx, land - 1, nz)))
+                        add(c, nx, land, nz, WALK * 0.8 + FALL[Math.min(d, 256)], Move.DOWN);
+                }
+            } else if (breaker != null && floor(nx, y - 1, nz)) {
+                double t = clear(new int[]{nx, y, nz}, new int[]{nx, y + 1, nz});
+                if (t >= 0) add(c, nx, y, nz, WALK + t, Move.DIG);
+            }
+            // up a step onto (nx, y, nz)
+            if (floor(nx, y, nz) && !dangerous(id(nx, y, nz))) {
+                if (passable(x, y + 2, z) && passable(nx, y + 1, nz) && passable(nx, y + 2, nz)) add(c, nx, y + 1, nz, JUMP, Move.UP);
+                else if (breaker != null) {
+                    double t = clear(new int[]{x, y + 2, z}, new int[]{nx, y + 1, nz}, new int[]{nx, y + 2, nz});
+                    if (t >= 0) add(c, nx, y + 1, nz, JUMP + t, Move.UP);
+                }
+            }
+            // a step down by digging (a staircase): the block ahead and the one under it
+            if (breaker != null && !feet && floor(nx, y - 2, nz) && !dangerous(id(nx, y - 2, nz))) {
+                double t = clear(new int[]{nx, y + 1, nz}, new int[]{nx, y, nz}, new int[]{nx, y - 1, nz});
+                if (t >= 0) add(c, nx, y - 1, nz, WALK + t, Move.DIG);
+            }
+        }
+        // diagonals, only with both sides open (a 0.6 wide body can't squeeze past a corner)
+        for (int[] d : CORNERS) {
+            int ax = d[0], bz = d[1], nx = x + ax, nz = z + bz;
+            if (!loaded(nx, y, nz)) continue;
+            if (passable(nx, y, nz) && passable(nx, y + 1, nz) && floor(nx, y - 1, nz) && !water(id(nx, y, nz)) && !dangerous(id(nx, y - 1, nz))
+                    && passable(x + ax, y, z) && passable(x + ax, y + 1, z) && passable(x, y, z + bz) && passable(x, y + 1, z + bz)
+                    && !door(id(x + ax, y, z)) && !door(id(x, y, z + bz)))
+                add(c, nx, y, nz, DIAG, Move.DIAG);
+        }
+        // up and down in water and on ladders
+        if (inWater || onLadder) {
+            if (passable(x, y + 1, z) && passable(x, y + 2, z)) add(c, x, y + 1, z, inWater ? SWIM : LADDER_UP, inWater ? Move.SWIM : Move.CLIMB);
+            if (passable(x, y - 1, z) && (water(id(x, y - 1, z)) || ladder(x, y - 1, z))) add(c, x, y - 1, z, inWater ? SWIM : LADDER_DOWN, inWater ? Move.SWIM : Move.CLIMB);
+        }
+        if (breaker == null) return;
+        // dig straight down (never into lava, water or a long drop)
+        if (!inWater && !passable(x, y - 1, z) && floor(x, y - 2, z) && !dangerous(id(x, y - 2, z)) && !water(id(x, y - 2, z)) && !nearLava(x, y - 1, z)) {
+            double t = clear(new int[]{x, y - 1, z});
+            if (t >= 0) add(c, x, y - 1, z, t + 2, Move.DIG_DOWN);
+        }
+        // pillar up: jump and put a block where the feet were
+        if (blocks > 0 && !inWater && !onLadder && floor(x, y - 1, z)) {
+            double t = clear(new int[]{x, y + 2, z});
+            if (t >= 0) add(c, x, y + 1, z, JUMP + PLACE + t, Move.PILLAR);
+        }
+    }
+
+    /**
+     * The corners of a path a straight walk can't skip (mineflayer-pathfinder's shortcut): runs of plain walking on one
+     * level are cut to their ends when the line between them is clear and floored all the way.
+     */
+    Path shorten(Path p) {
+        if (p == null || p.points.size() < 3) return p;
+        Path out = new Path();
+        out.complete = p.complete; out.searched = p.searched;
+        int i = 0;
+        while (i < p.points.size()) {
+            int[] a = p.points.get(i);
+            int j = i;
+            if (plain(a)) while (j + 1 < p.points.size() && plain(p.points.get(j + 1)) && p.points.get(j + 1)[1] == a[1] && straight(a, p.points.get(j + 1))) j++;
+            out.points.add(p.points.get(j));
+            i = j + 1;
+        }
+        return out;
+    }
+
+    private static boolean plain(int[] p) { return p[3] == Move.WALK.ordinal() || p[3] == Move.DIAG.ordinal(); }
+
+    /** Every block under a straight line from a to b (same level) is floor with room above, and no water, doors or danger. */
+    private boolean straight(int[] a, int[] b) {
+        double dx = b[0] - a[0], dz = b[2] - a[2], len = Math.sqrt(dx * dx + dz * dz);
+        int steps = (int) Math.ceil(len * 4);
+        for (int s = 0; s <= steps; s++) {
+            double fx = a[0] + 0.5 + dx * s / Math.max(1, steps), fz = a[2] + 0.5 + dz * s / Math.max(1, steps);
+            for (double ox = -0.3; ox <= 0.3; ox += 0.6) for (double oz = -0.3; oz <= 0.3; oz += 0.6) {
+                int x = (int) Math.floor(fx + ox), z = (int) Math.floor(fz + oz);
+                int idf = id(x, a[1], z);
+                if (!passable(x, a[1], z) || !passable(x, a[1] + 1, z) || water(idf) || door(idf) || !floor(x, a[1] - 1, z) || dangerous(id(x, a[1] - 1, z))) return false;
+            }
+        }
+        return true;
+    }
+
+    /** Still walkable as planned? (Only a change on the path makes it plan again: mineflayer-pathfinder's rule.) */
+    boolean stillGood(Path p) { return firstBad(p) < 0; }
+
+    /** The first of the next 12 points that no longer works, or -1. */
+    int firstBad(Path p) {
+        for (int i = p.index; i < Math.min(p.points.size(), p.index + 12); i++) if (!good(p.points.get(i), false)) return i;
+        return -1;
+    }
+
+    private boolean walkable(Path p, int from, int to) {
+        for (int i = from; i < to; i++) if (!good(p.points.get(i), true)) return false;
+        return true;
+    }
+
+    /** strict: dug spots must be open still (a remembered path); otherwise what it digs or builds itself is skipped. */
+    private boolean good(int[] q, boolean strict) {
+        Move m = Move.values()[q[3]];
+        if (m == Move.DIG_DOWN || m == Move.PILLAR || (m == Move.DIG || m == Move.UP) && !strict) return true; // it changes those itself (a step up may need leaves dug)
+        if (!passable(q[0], q[1], q[2]) || !passable(q[0], q[1] + 1, q[2])) return false;
+        if ((m == Move.WALK || m == Move.DIAG || m == Move.UP || m == Move.DIG) && !floor(q[0], q[1] - 1, q[2]) && !water(id(q[0], q[1], q[2])) && !ladder(q[0], q[1], q[2])) return false;
+        return true;
+    }
+
+    /** A repaired stretch, then the rest of the old path (D* Lite's point: fix the broken part, keep the rest). */
+    static Path join(Path head, List<int[]> tail) {
+        Path p = new Path();
+        p.complete = true; p.searched = head.searched;
+        p.points.addAll(head.points); p.points.addAll(tail);
+        return p;
+    }
+}

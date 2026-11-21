@@ -1,0 +1,298 @@
+# Indev 20100223 -> Alpha 1.1.2_01 Feather names, for the Classic Bots (see tools/Remap.java for the format).
+# Only what the bots use. Found with javap against the game jar; Indev is Alpha's direct ancestor, so most members
+# have an Alpha twin. What Indev lacks (or keeps as float where Alpha has double) is a STUB, filled in by
+# bots/indev/.../Compat.java.
+
+# ------------------------------------------------------------------ classes
+CLASS a/a                               net/minecraft/util/math/MathHelper
+CLASS net/minecraft/a/b                 net/minecraft/inventory/Inventory
+CLASS net/minecraft/a/a/g               net/minecraft/world/World
+CLASS net/minecraft/a/a/i               net/minecraft/world/EntityMap
+CLASS net/minecraft/a/a/b/x             net/minecraft/block/Block
+CLASS net/minecraft/a/a/b/n             net/minecraft/block/Block$Sounds
+CLASS net/minecraft/a/a/b/q             net/minecraft/block/BlockWithBlockEntity
+CLASS net/minecraft/a/a/d/c             net/minecraft/block/material/Material
+CLASS net/minecraft/a/a/b/a/a           net/minecraft/block/entity/BlockEntity
+CLASS net/minecraft/a/a/b/a/c           net/minecraft/block/entity/ChestBlockEntity
+CLASS net/minecraft/a/a/b/a/b           net/minecraft/block/entity/FurnaceBlockEntity
+CLASS net/minecraft/a/b/i               net/minecraft/item/Item
+CLASS net/minecraft/a/b/p               net/minecraft/item/FoodItem
+CLASS net/minecraft/a/b/k               net/minecraft/item/ItemStack
+CLASS net/minecraft/a/d/b               net/minecraft/util/math/Box
+CLASS net/minecraft/a/d/a               net/minecraft/util/math/Vec3d
+CLASS net/minecraft/a/d/c               net/minecraft/util/hit/HitResult
+CLASS net/minecraft/a/c/b               net/minecraft/entity/Entity
+CLASS net/minecraft/a/c/e               net/minecraft/entity/mob/MobEntity
+CLASS net/minecraft/a/c/c               net/minecraft/entity/mob/PathFinderMobEntity
+CLASS net/minecraft/a/c/e/a             net/minecraft/entity/mob/player/PlayerEntity
+CLASS net/minecraft/a/c/e/b             net/minecraft/entity/mob/player/PlayerInventory
+CLASS net/minecraft/a/c/c/b             net/minecraft/entity/ItemEntity
+CLASS net/minecraft/a/c/a/e             net/minecraft/entity/mob/monster/Monster
+CLASS net/minecraft/a/c/a/f             net/minecraft/entity/mob/monster/ZombieEntity
+CLASS net/minecraft/a/c/a/b             net/minecraft/entity/mob/monster/SpiderEntity
+CLASS net/minecraft/a/c/a/c             net/minecraft/entity/mob/monster/SkeletonEntity
+CLASS net/minecraft/a/c/a/d             net/minecraft/entity/mob/monster/CreeperEntity
+CLASS net/minecraft/a/c/a/a             net/minecraft/entity/mob/monster/GiantEntity
+CLASS net/minecraft/a/c/b/a             net/minecraft/entity/mob/animal/AnimalEntity
+CLASS net/minecraft/a/c/b/b             net/minecraft/entity/mob/animal/SheepEntity
+CLASS net/minecraft/a/c/b/c             net/minecraft/entity/mob/animal/PigEntity
+CLASS com/a/a/j                         net/minecraft/nbt/NbtElement
+CLASS com/a/a/c                         net/minecraft/nbt/NbtCompound
+CLASS com/a/a/f                         net/minecraft/nbt/NbtList
+CLASS net/minecraft/a/a/a               net/minecraft/world/storage/LevelIo
+CLASS net/minecraft/client/d            net/minecraft/client/Minecraft
+# not in Indev: instanceof is false, casts never reached
+ABSENT net/minecraft/entity/mob/animal/ChickenEntity net/minecraft/entity/mob/animal/AnimalEntity
+ABSENT net/minecraft/entity/mob/animal/CowEntity net/minecraft/entity/mob/animal/AnimalEntity
+ABSENT net/minecraft/entity/mob/monster/SlimeEntity net/minecraft/entity/mob/MobEntity
+
+# ------------------------------------------------------------------ util
+METHOD a/a a (D)I floor
+METHOD a/a d (F)I floor
+METHOD a/a a (F)F sin
+METHOD a/a b (F)F cos
+METHOD a/a c (F)F sqrt
+STUB net/minecraft/util/math/Box minX D
+STUB net/minecraft/util/math/Box minY D
+STUB net/minecraft/util/math/Box minZ D
+STUB net/minecraft/util/math/Box maxX D
+STUB net/minecraft/util/math/Box maxY D
+STUB net/minecraft/util/math/Box maxZ D
+STUB net/minecraft/util/math/Box grown (DDD)Lnet/minecraft/util/math/Box;
+FIELD net/minecraft/a/d/b a F minXf
+FIELD net/minecraft/a/d/b b F minYf
+FIELD net/minecraft/a/d/b c F minZf
+FIELD net/minecraft/a/d/b d F maxXf
+FIELD net/minecraft/a/d/b e F maxYf
+FIELD net/minecraft/a/d/b f F maxZf
+
+# ------------------------------------------------------------------ nbt
+METHOD com/a/a/c a (Ljava/lang/String;Lcom/a/a/j;)V put
+METHOD com/a/a/c a (Ljava/lang/String;B)V putByte
+METHOD com/a/a/c a (Ljava/lang/String;S)V putShort
+METHOD com/a/a/c a (Ljava/lang/String;I)V putInt
+METHOD com/a/a/c a (Ljava/lang/String;J)V putLong
+METHOD com/a/a/c a (Ljava/lang/String;F)V putFloat
+METHOD com/a/a/c a (Ljava/lang/String;Ljava/lang/String;)V putString
+METHOD com/a/a/c a (Ljava/lang/String;Lcom/a/a/c;)V putCompound
+METHOD com/a/a/c a (Ljava/lang/String;Z)V putBoolean
+METHOD com/a/a/c a (Ljava/lang/String;)Z contains
+METHOD com/a/a/c b (Ljava/lang/String;)B getByte
+METHOD com/a/a/c c (Ljava/lang/String;)S getShort
+METHOD com/a/a/c d (Ljava/lang/String;)I getInt
+METHOD com/a/a/c e (Ljava/lang/String;)J getLong
+METHOD com/a/a/c f (Ljava/lang/String;)F getFloat
+METHOD com/a/a/c g (Ljava/lang/String;)Ljava/lang/String; getString
+METHOD com/a/a/c i (Ljava/lang/String;)Lcom/a/a/c; getCompound
+METHOD com/a/a/c j (Ljava/lang/String;)Lcom/a/a/f; getList
+METHOD com/a/a/c k (Ljava/lang/String;)Z getBoolean
+METHOD com/a/a/f a (Lcom/a/a/j;)V addElement
+METHOD com/a/a/f a (I)Lcom/a/a/j; get
+METHOD com/a/a/f b ()I size
+
+# ------------------------------------------------------------------ blocks and items
+FIELD net/minecraft/a/a/b/x c [Lnet/minecraft/a/a/b/x; BY_ID
+FIELD net/minecraft/a/a/b/x at I id
+FIELD net/minecraft/a/a/b/x aC Lnet/minecraft/a/a/d/c; material
+FIELD net/minecraft/a/a/b/x aA Lnet/minecraft/a/a/b/n; sounds
+FIELD net/minecraft/a/a/b/x aL F miningTime
+METHOD net/minecraft/a/a/b/x f (Lnet/minecraft/a/a/g;IIII)V dropItems
+METHOD net/minecraft/a/a/b/x a (ILjava/util/Random;)I getDropItem
+METHOD net/minecraft/a/a/b/x c (Lnet/minecraft/a/a/g;IIII)V onBroken
+METHOD net/minecraft/a/a/b/x a ()I getRenderType
+FIELD net/minecraft/a/a/b/n a F volume
+FIELD net/minecraft/a/a/b/n b F pitch
+METHOD net/minecraft/a/a/b/n a ()Ljava/lang/String; getBreakSound
+FIELD net/minecraft/a/a/d/c a Lnet/minecraft/a/a/d/c; AIR
+FIELD net/minecraft/a/a/d/c c Lnet/minecraft/a/a/d/c; WOOD
+FIELD net/minecraft/a/a/d/c d Lnet/minecraft/a/a/d/c; STONE
+FIELD net/minecraft/a/a/d/c e Lnet/minecraft/a/a/d/c; IRON
+FIELD net/minecraft/a/a/d/c f Lnet/minecraft/a/a/d/c; WATER
+FIELD net/minecraft/a/a/d/c g Lnet/minecraft/a/a/d/c; LAVA
+METHOD net/minecraft/a/a/d/c c ()Z blocksMovement
+METHOD net/minecraft/a/a/d/c d ()Z isLiquid
+STUB net/minecraft/block/material/Material SNOW Lnet/minecraft/block/material/Material; static
+STUB net/minecraft/block/material/Material SNOW_LAYER Lnet/minecraft/block/material/Material; static
+FIELD net/minecraft/a/b/i b [Lnet/minecraft/a/b/i; BY_ID
+FIELD net/minecraft/a/b/i A Lnet/minecraft/a/b/i; BOWL
+FIELD net/minecraft/a/b/i ap I id
+FIELD net/minecraft/a/b/k a I size
+FIELD net/minecraft/a/b/k c I id
+FIELD net/minecraft/a/b/k d I metadata
+METHOD net/minecraft/a/b/k b (I)V takeDamageAndBreak
+METHOD net/minecraft/a/b/k a (Lcom/a/a/c;)Lcom/a/a/c; writeNbt
+METHOD net/minecraft/a/b/k a ()Lnet/minecraft/a/b/i; getItem
+STUB net/minecraft/item/ItemStack copy ()Lnet/minecraft/item/ItemStack;
+STUB net/minecraft/item/ItemStack getMaxSize ()I
+STUB net/minecraft/item/ItemStack canMineBlock (Lnet/minecraft/block/Block;)Z
+STUB net/minecraft/item/ItemStack getMiningSpeed (Lnet/minecraft/block/Block;)F
+STUB net/minecraft/item/ItemStack getAttackDamage (Lnet/minecraft/entity/Entity;)I
+METHOD net/minecraft/a/b a ()I getSize
+METHOD net/minecraft/a/b a (I)Lnet/minecraft/a/b/k; getItem
+METHOD net/minecraft/a/b a (II)Lnet/minecraft/a/b/k; removeItem
+METHOD net/minecraft/a/b a (ILnet/minecraft/a/b/k;)V setItem
+METHOD net/minecraft/a/b b ()Ljava/lang/String; getInventoryName
+METHOD net/minecraft/a/b c ()I getMaxStackSize
+STUB net/minecraft/inventory/Inventory markDirty ()V
+FIELD net/minecraft/a/a/b/a/a a Lnet/minecraft/a/a/g; world
+FIELD net/minecraft/a/a/b/a/a b I x
+FIELD net/minecraft/a/a/b/a/a c I y
+FIELD net/minecraft/a/a/b/a/a d I z
+
+# ------------------------------------------------------------------ world (a level: one array, no chunks, one player)
+FIELD net/minecraft/a/a/g a I sizeX
+FIELD net/minecraft/a/a/g b I sizeZ
+FIELD net/minecraft/a/a/g c I sizeY
+FIELD net/minecraft/a/a/g r Lnet/minecraft/a/a/i; entityMap
+FIELD net/minecraft/a/a/g y Lnet/minecraft/a/c/e; player
+FIELD net/minecraft/a/a/g q Ljava/util/Random; random
+FIELD net/minecraft/a/a/g D I time
+FIELD net/minecraft/a/a/g E I difficulty
+FIELD net/minecraft/a/a/i e Ljava/util/List; all
+METHOD net/minecraft/a/a/g a (III)I getBlock
+METHOD net/minecraft/a/a/g b (IIII)Z setBlock
+METHOD net/minecraft/a/a/g e (III)B getData
+METHOD net/minecraft/a/a/g f (IIII)V setData
+METHOD net/minecraft/a/a/g f (III)Lnet/minecraft/a/a/d/c; getMaterial
+# Indev's makes a block entity for any block (and casts it to a container block): the stub asks only containers
+METHOD net/minecraft/a/a/g j (III)Lnet/minecraft/a/a/b/a/a; getOrMakeBlockEntity
+STUB net/minecraft/world/World getBlockEntity (III)Lnet/minecraft/block/entity/BlockEntity;
+METHOD net/minecraft/a/a/g a (Lnet/minecraft/a/c/b;)V spawnEntity
+METHOD net/minecraft/a/a/g b (Lnet/minecraft/a/c/b;)V despawnEntity
+METHOD net/minecraft/a/a/g a (Lnet/minecraft/a/c/b;Ljava/lang/String;FF)V playSound
+METHOD net/minecraft/a/a/g a (FFFLjava/lang/String;FF)V playSoundf
+METHOD net/minecraft/a/a/g a (Lnet/minecraft/a/d/a;Lnet/minecraft/a/d/a;)Lnet/minecraft/a/d/c; rayTrace
+STUB net/minecraft/world/World entities Ljava/util/List;
+STUB net/minecraft/world/World players Ljava/util/List;
+STUB net/minecraft/world/World isMultiplayer Z
+STUB net/minecraft/world/World ticks J
+STUB net/minecraft/world/World getBlockMetadata (III)I
+STUB net/minecraft/world/World setBlockWithMetadata (IIIII)Z
+STUB net/minecraft/world/World getEntitiesOfType (Ljava/lang/Class;Lnet/minecraft/util/math/Box;)Ljava/util/List;
+STUB net/minecraft/world/World getHeight (II)I
+STUB net/minecraft/world/World isChunkLoaded (III)Z
+STUB net/minecraft/world/World addEntity (Lnet/minecraft/entity/Entity;)Z
+STUB net/minecraft/world/World playSound (DDDLjava/lang/String;FF)V
+STUB net/minecraft/world/World setTime (J)V
+
+# ------------------------------------------------------------------ entities
+FIELD net/minecraft/a/c/b d Lnet/minecraft/a/a/g; world
+FIELD net/minecraft/a/c/b h F xf
+FIELD net/minecraft/a/c/b i F yf
+FIELD net/minecraft/a/c/b j F zf
+FIELD net/minecraft/a/c/b e F prevXf
+FIELD net/minecraft/a/c/b f F prevYf
+FIELD net/minecraft/a/c/b g F prevZf
+FIELD net/minecraft/a/c/b k F velocityXf
+FIELD net/minecraft/a/c/b l F velocityYf
+FIELD net/minecraft/a/c/b m F velocityZf
+FIELD net/minecraft/a/c/b n F yaw
+FIELD net/minecraft/a/c/b o F pitch
+FIELD net/minecraft/a/c/b p F prevYaw
+FIELD net/minecraft/a/c/b q F prevPitch
+FIELD net/minecraft/a/c/b r Lnet/minecraft/a/d/b; shape
+FIELD net/minecraft/a/c/b s Z onGround
+FIELD net/minecraft/a/c/b t Z collidingHorizontally
+FIELD net/minecraft/a/c/b u Z removed
+FIELD net/minecraft/a/c/b v F eyeHeight
+FIELD net/minecraft/a/c/b w F width
+FIELD net/minecraft/a/c/b x F height
+FIELD net/minecraft/a/c/b b F fallDistance
+FIELD net/minecraft/a/c/b E F stepHeight
+FIELD net/minecraft/a/c/b G Ljava/util/Random; random
+FIELD net/minecraft/a/c/b H I ticks
+FIELD net/minecraft/a/c/b J I onFireTimer
+FIELD net/minecraft/a/c/b M I breath
+METHOD net/minecraft/a/c/b k ()V remove
+METHOD net/minecraft/a/c/b b (FFF)V setPositionf
+METHOD net/minecraft/a/c/b b (FFFFF)V setPositionAndAnglesf
+METHOD net/minecraft/a/c/b a (FF)V setSize
+# Indev's is the squared distance
+METHOD net/minecraft/a/c/b b (Lnet/minecraft/a/c/b;)F squaredDistanceTof
+STUB net/minecraft/entity/Entity distanceTo (Lnet/minecraft/entity/Entity;)F
+METHOD net/minecraft/a/c/b l ()Z isInWater
+METHOD net/minecraft/a/c/b m ()Z isEyeInWater
+METHOD net/minecraft/a/c/b o ()Z isInLava
+METHOD net/minecraft/a/c/b a (Lnet/minecraft/a/c/b;I)Z takeDamage
+METHOD net/minecraft/a/c/b b_ ()V tick
+METHOD net/minecraft/a/c/b a ()Ljava/lang/String; getSaveId
+METHOD net/minecraft/a/c/b a (Lcom/a/a/c;)V writeCustomNbt
+METHOD net/minecraft/a/c/b b (Lcom/a/a/c;)V readCustomNbt
+METHOD net/minecraft/a/c/b c (Lcom/a/a/c;)V writeNbt
+METHOD net/minecraft/a/c/b d (Lcom/a/a/c;)V readNbt
+METHOD net/minecraft/a/c/b r ()Z isAlive
+STUB net/minecraft/entity/Entity x D
+STUB net/minecraft/entity/Entity y D
+STUB net/minecraft/entity/Entity z D
+STUB net/minecraft/entity/Entity velocityX D
+STUB net/minecraft/entity/Entity velocityY D
+STUB net/minecraft/entity/Entity velocityZ D
+STUB net/minecraft/entity/Entity setPosition (DDD)V
+STUB net/minecraft/entity/Entity setPositionAndAngles (DDDFF)V
+STUB net/minecraft/entity/Entity distanceTo (DDD)D
+STUB net/minecraft/entity/Entity squaredDistanceTo (Lnet/minecraft/entity/Entity;)D
+STUB net/minecraft/entity/Entity canSee (Lnet/minecraft/entity/Entity;)Z
+STUB net/minecraft/entity/Entity getEyeHeight ()F
+STUB net/minecraft/entity/Entity isSubmergedIn (Lnet/minecraft/block/material/Material;)Z
+STUB net/minecraft/entity/Entity isInWall ()Z
+STUB net/minecraft/entity/Entity interact (Lnet/minecraft/entity/mob/player/PlayerEntity;)Z
+FIELD net/minecraft/a/c/e W I health
+FIELD net/minecraft/a/c/e V Ljava/lang/String; texture
+FIELD net/minecraft/a/c/e am F walkSpeed
+FIELD net/minecraft/a/c/e aj F sidewaysSpeed
+FIELD net/minecraft/a/c/e ak F forwardSpeed
+FIELD net/minecraft/a/c/e al Z jumping
+FIELD net/minecraft/a/c/e ai I despawnCounter
+FIELD net/minecraft/a/c/e T F bodyYaw
+FIELD net/minecraft/a/c/e Y I hurtTime
+FIELD net/minecraft/a/c/e ab I deathTime
+METHOD net/minecraft/a/c/e e ()V aiTick
+METHOD net/minecraft/a/c/e b (I)V heal
+METHOD net/minecraft/a/c/e f ()V tickMovement
+METHOD net/minecraft/a/c/e g ()Ljava/lang/String; getAmbientSound
+METHOD net/minecraft/a/c/e h ()Ljava/lang/String; getHurtSound
+METHOD net/minecraft/a/c/e i ()Ljava/lang/String; getDeathSound
+STUB net/minecraft/entity/mob/MobEntity getTexture ()Ljava/lang/String;
+STUB net/minecraft/entity/mob/MobEntity dead Z
+STUB net/minecraft/entity/mob/MobEntity interpolateOnly Z
+STUB net/minecraft/entity/mob/MobEntity attackAnimationProgress F
+FIELD net/minecraft/a/c/e/a b Lnet/minecraft/a/c/e/b; inventory
+STUB net/minecraft/entity/mob/player/PlayerEntity name Ljava/lang/String;
+FIELD net/minecraft/a/c/e/b a [Lnet/minecraft/a/b/k; items
+FIELD net/minecraft/a/c/e/b c I selectedSlot
+METHOD net/minecraft/a/c/e/b a (Lnet/minecraft/a/b/k;)Z addItem
+METHOD net/minecraft/a/c/e/b d ()Lnet/minecraft/a/b/k; getSelectedItem
+FIELD net/minecraft/a/c/c/b a Lnet/minecraft/a/b/k; item
+FIELD net/minecraft/a/c/c/b b I ticks
+FIELD net/minecraft/a/c/c/b O I pickUpDelay
+
+# ------------------------------------------------------------------ client (chat box, chat lines, the test)
+CLASS net/minecraft/client/c/i          net/minecraft/client/gui/screen/Screen
+CLASS net/minecraft/client/c/k          net/minecraft/client/gui/DrawableHelper
+CLASS net/minecraft/client/c/j          net/minecraft/client/render/TextRenderer
+CLASS net/minecraft/client/q            net/minecraft/client/options/GameOptions
+CLASS net/minecraft/client/g/a          net/minecraft/client/entity/mob/player/ClientPlayerEntity
+FIELD net/minecraft/client/d b I displayWidth
+FIELD net/minecraft/client/d c I displayHeight
+FIELD net/minecraft/client/d d Lnet/minecraft/a/a/g; world
+FIELD net/minecraft/client/d f Lnet/minecraft/client/g/a; player
+FIELD net/minecraft/client/d n Lnet/minecraft/client/c/j; textRenderer
+FIELD net/minecraft/client/d o Lnet/minecraft/client/c/i; screen
+FIELD net/minecraft/client/d w Lnet/minecraft/client/q; options
+METHOD net/minecraft/client/d a (Lnet/minecraft/client/c/i;)V openScreen
+METHOD net/minecraft/client/d a (Lnet/minecraft/a/a/g;)V setWorld
+FIELD net/minecraft/client/c/i b Lnet/minecraft/client/d; minecraft
+FIELD net/minecraft/client/c/i c I width
+FIELD net/minecraft/client/c/i d I height
+FIELD net/minecraft/client/c/i g Lnet/minecraft/client/c/j; textRenderer
+METHOD net/minecraft/client/c/i a (IIF)V render
+METHOD net/minecraft/client/c/i a (CI)V keyPressed
+METHOD net/minecraft/client/c/i b ()V init
+METHOD net/minecraft/client/c/i a ()V removed
+METHOD net/minecraft/client/c/i f_ ()V tick
+METHOD net/minecraft/client/c/i c ()Z shouldPauseGame
+METHOD net/minecraft/client/c/k a (IIIII)V fill
+METHOD net/minecraft/client/c/j a (Ljava/lang/String;III)V drawWithShadow
+METHOD net/minecraft/client/c/j a (Ljava/lang/String;)I getWidth
+FIELD net/minecraft/client/q a Z music
+FIELD net/minecraft/client/q b Z sound
