@@ -126,6 +126,62 @@ final class Game {
         }
     }
 
+    /** Moves the player properly (its collision box too): Classic's setPos, Indev's b(float, float, float). y is the eye. */
+    void setPos(float x, float y, float z) {
+        Object p = player();
+        try {
+            Method m = null;
+            for (Class<?> k = p.getClass(); k != null && m == null; k = k.getSuperclass())
+                try { m = k.getDeclaredMethod(indev ? "b" : "setPos", float.class, float.class, float.class); } catch (NoSuchMethodException ignored) {}
+            m.setAccessible(true);
+            m.invoke(p, x, y, z);
+            pxo.setFloat(p, x); pyo.setFloat(p, y); pzo.setFloat(p, z);
+        } catch (Exception e) {
+            Hooks.log("could not move the player: " + e);
+        }
+    }
+
+    /** The game's own level reader and writer (the same classes the game's Load/Save use). */
+    Object loadLevel(java.io.File f) throws Exception {
+        ClassLoader cl = mc.getClass().getClassLoader();
+        java.io.InputStream in = new java.io.FileInputStream(f);
+        try {
+            if (indev) {
+                Class<?> io = Class.forName("net.minecraft.client.f", true, cl);
+                Object loader = io.getConstructors()[0].newInstance(mc, null);
+                return io.getSuperclass().getMethod("a", java.io.InputStream.class).invoke(loader, in);
+            }
+            Class<?> io = Class.forName("com.mojang.minecraft.level.a", true, cl);
+            Object loader = io.getConstructor(Class.forName("com.mojang.minecraft.i", true, cl)).newInstance((Object) null);
+            return io.getMethod("a", java.io.InputStream.class).invoke(loader, in);
+        } finally {
+            in.close();
+        }
+    }
+
+    void saveLevel(java.io.File f) throws Exception {
+        ClassLoader cl = mc.getClass().getClassLoader();
+        java.io.OutputStream o = new java.io.BufferedOutputStream(new java.io.FileOutputStream(f));
+        try {
+            if (indev) {
+                Class<?> io = Class.forName("net.minecraft.client.f", true, cl);
+                Object writer = io.getConstructors()[0].newInstance(mc, null);
+                io.getSuperclass().getMethod("a", level.getClass(), java.io.OutputStream.class).invoke(writer, level, o);
+            } else {
+                Class.forName("com.mojang.minecraft.level.a", true, cl).getMethod("a", level.getClass(), java.io.OutputStream.class).invoke(null, level, o);
+            }
+        } finally {
+            o.close();
+        }
+    }
+
+    /** Opens a level in the game (Minecraft's own setter for its level field). */
+    void setLevel(Object lv) throws Exception {
+        for (Method m : mc.getClass().getMethods())
+            if (m.getParameterTypes().length == 1 && m.getParameterTypes()[0] == fLevel.getType()) { m.invoke(mc, lv); return; }
+        throw new NoSuchMethodException("set level");
+    }
+
     void setView(float yaw, float pitch) {
         Object p = player();
         try {

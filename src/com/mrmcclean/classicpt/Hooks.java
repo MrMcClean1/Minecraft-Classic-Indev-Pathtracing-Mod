@@ -32,7 +32,7 @@ public final class Hooks {
     /** Each frame, before Display.update (menus too). */
     public static void frame(Object owner) {
         try {
-            if (setup(owner)) Test.frame();
+            if (setup(owner)) { Test.frame(); Museum.frame(game); }
         } catch (Throwable t) {
             log("frame hook: " + t);
         }
@@ -42,10 +42,12 @@ public final class Hooks {
     public static void beforeHud(float partial, Object owner) {
         try {
             if (!setup(owner)) return;
-            if (!Test.running() && Keyboard.isCreated() && game.noScreen()) keys();
+            if (!Test.running() && !Museum.running() && Keyboard.isCreated() && game.noScreen()) keys();
             Test.beforeTrace(partial);
+            Museum.beforeTrace(game);
             if (enabled) tracer.render(partial);
             Test.afterTrace(partial);
+            Museum.afterTrace(game);
         } catch (Throwable t) {
             log("path tracer stopped: " + t);
             t.printStackTrace();
@@ -83,7 +85,7 @@ public final class Hooks {
 
     static void say(String s) {
         log(s);
-        if (game != null && !Test.running()) game.message(s);
+        if (game != null && !Test.running() && !Museum.running()) game.message(s);
     }
 
     static void log(String s) { System.out.println("[ClassicPT] " + s); }

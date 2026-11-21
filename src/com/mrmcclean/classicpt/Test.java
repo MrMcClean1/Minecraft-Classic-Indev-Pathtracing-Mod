@@ -44,10 +44,13 @@ final class Test {
     static void init(Game game) {
         g = game;
         File run = new File("classicpt-test", "run");
-        if (run.isFile() && run.delete()) {
-            on = true;
-            Hooks.log("test armed: " + g.name);
-        }
+        if (!run.isFile()) return;
+        String words = "";
+        try { words = new String(java.nio.file.Files.readAllBytes(run.toPath()), "UTF-8"); } catch (Exception ignored) {}
+        if (!run.delete()) return;
+        if (Museum.start(words)) return; // export / museum runs (the history museum)
+        on = true;
+        Hooks.log("test armed: " + g.name);
     }
 
     private static void check(boolean ok, String what) {
@@ -115,7 +118,7 @@ final class Test {
         }
     }
 
-    private static BufferedImage grab() {
+    static BufferedImage grab() {
         int w = g.width(), h = g.height();
         ByteBuffer b = BufferUtils.createByteBuffer(w * h * 4);
         GL11.glReadBuffer(GL11.GL_BACK);
