@@ -36,6 +36,40 @@ final class BotList {
         end();
     }
 
+    /** Names drawn so far (the bot test checks the switch with it). */
+    static int tagsDrawn;
+
+    /**
+     * A name over each bot within 48 blocks (nametags=true, the default; /bot nametags off): its head's place on the
+     * screen worked out from where you stand and look (these versions' 70 degree view), the name written there.
+     */
+    static void nametags(Minecraft mc) {
+        if (!BotConfig.nametags || mc.textRenderer == null || mc.world == null || mc.player == null) return;
+        PlayerEntity p = mc.player;
+        int h = 240, w = mc.displayWidth * h / Math.max(1, mc.displayHeight);
+        double yaw = Math.toRadians(p.yaw + Names.YAW_OFFSET), pitch = Math.toRadians(p.pitch), t = Math.tan(Math.toRadians(70) / 2);
+        double fx = -Math.sin(yaw) * Math.cos(pitch), fy = -Math.sin(pitch), fz = Math.cos(yaw) * Math.cos(pitch); // forward
+        double rx = -Math.cos(yaw), rz = -Math.sin(yaw);                                                        // right
+        double ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;                                               // up = right x forward
+        boolean begun = false;
+        for (BotEntity b : Bots.bots(mc.world)) {
+            double dx = b.x - p.x, dy = b.y + 0.55 - p.y, dz = b.z - p.z;
+            double depth = dx * fx + dy * fy + dz * fz;
+            if (depth < 0.3 || dx * dx + dy * dy + dz * dz > 48 * 48) continue;
+            double cx = dx * rx + dz * rz, cy = dx * ux + dy * uy + dz * uz;
+            int sx = (int) Math.round(w / 2.0 + cx / depth / t * (h / 2.0)), sy = (int) Math.round(h / 2.0 - cy / depth / t * (h / 2.0));
+            if (sx < -50 || sx > w + 50 || sy < -10 || sy > h + 10) continue;
+            if (!begun) { begin(w, h); begun = true; }
+            String n = b.botName();
+            int nw = mc.textRenderer.getWidth(n);
+            fill(sx - nw / 2 - 1, sy - 1, sx + nw / 2 + 1, sy + 8, 0x40000000);
+            GL11.glEnable(GL11.GL_TEXTURE_2D);
+            mc.textRenderer.drawWithShadow(n, sx - nw / 2, sy, 0xFFFFFF);
+            tagsDrawn++;
+        }
+        if (begun) end();
+    }
+
     private static String cut(Minecraft mc, String s, int width) {
         if (mc.textRenderer.getWidth(s) <= width) return s;
         while (s.length() > 3 && mc.textRenderer.getWidth(s + "...") > width) s = s.substring(0, s.length() - 1);

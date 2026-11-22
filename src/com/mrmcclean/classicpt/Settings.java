@@ -44,8 +44,8 @@ final class Settings {
     static final float MAX_APERTURE = 0.5f;
     boolean timelapseEnabled = false, timelapseVideo = true;
     int timelapseFrames = 120, timelapseFps = 30;
-    /** On when the game starts (`enabled`; off by default here, where the others start on). */
-    boolean startOn = false;
+    /** On when the game starts (`enabled`; on by default, as in the other versions: MrMcClean, 2026-11-22). */
+    boolean startOn = true;
     /** Optional effects, off by default here: sun shafts, snow and ice glinting in the sun, solid (Fast) leaves. */
     boolean godRays = false, snowSparkle = false, fastLeaves = false;
 

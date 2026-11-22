@@ -8,6 +8,8 @@ public final class Names {
 
     /** Classic has no crafting: bots gather, build, follow and fight with what they find. */
     static final boolean CRAFTING = false;
+    /** Classic counts yaw from north (0 faces -z), the later versions from south: added to a yaw before the usual sums. */
+    static final double YAW_OFFSET = 180;
 
     private static final String[] NAMES = new String[400];
     static {

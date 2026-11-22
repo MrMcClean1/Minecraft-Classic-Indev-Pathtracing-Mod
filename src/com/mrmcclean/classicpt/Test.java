@@ -333,8 +333,8 @@ final class Test {
 
     private static void optionsStart(Tracer t) {
         Settings dflt = new Settings();
-        check(!dflt.startOn && !dflt.godRays && !dflt.snowSparkle && !dflt.fastLeaves && dflt.upscaler == Settings.UPSCALER_BASIC,
-                "on-at-start, god rays, snow sparkle, Fast leaves and FSR are off by default");
+        check(dflt.startOn && !dflt.godRays && !dflt.snowSparkle && !dflt.fastLeaves && dflt.upscaler == Settings.UPSCALER_BASIC,
+                "on at start by default (as the other versions); god rays, snow sparkle, Fast leaves and FSR off by default");
         java.util.Properties p = new java.util.Properties();
         p.setProperty("enabled", "true"); p.setProperty("fx.godRays", "true"); p.setProperty("fx.snowSparkle", "true");
         p.setProperty("leaves", "fast"); p.setProperty("upscaler", "fsr");

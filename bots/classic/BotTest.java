@@ -39,6 +39,8 @@ public final class BotTest {
     private static double lastX, lastZ;
     private static long lastSecond = -1;
     private static int jumps;
+    private static int tagsBefore, tagsOn = -1, spokenBefore;
+    private static boolean updateLeaked, answered, offAsked;
 
     static void init(Minecraft mc) {
         File run = new File("classicbots-test", "run");
@@ -375,6 +377,94 @@ public final class BotTest {
                 String r = VoiceChat.testResult;
                 if (r == null && inStep() < 60000) return;
                 check(r != null && r.startsWith("PASS"), r == null ? "voice: no answer in 60 s" : r.substring(5));
+                // the progression guide (on by default): "what next?", "help me with that", and "Nice" once the step is done
+                BotEntity b = bot(w);
+                if (b == null) { finish(mc); return; }
+                BotConfig.progressionGuide = true;
+                b.brain.mode = Brain.Mode.FOLLOW; b.brain.job = Brain.Job.NONE; b.brain.lastReport = "";
+                say(p, "Tess what next?");
+                step = 52; stepStart = System.currentTimeMillis();
+                return;
+            }
+            case 52: {
+                BotEntity b = bot(w);
+                if (!(b.brain.lastReport.startsWith("Next:") || b.brain.lastReport.contains("every step")) && inStep() < 5000) return;
+                check(b.brain.lastReport.startsWith("Next:") || b.brain.lastReport.contains("every step"), "guide: \"" + b.brain.lastReport + "\" (" + Guide.steps().size() + " steps in this version)");
+                b.brain.lastReport = "";
+                say(p, "Tess help me with that");
+                step = 53; stepStart = System.currentTimeMillis();
+                return;
+            }
+            case 53: {
+                BotEntity b = bot(w);
+                boolean fetching = b.brain.job == Brain.Job.GATHER || b.brain.job == Brain.Job.HUNT;
+                if (!fetching && inStep() < 5000) return;
+                check(fetching, "guide: \"help me with that\" sets it fetching: " + b.brain.statusLine() + " " + b.brain.lastReport);
+                b.brain.lastReport = "";
+                { int gi = Guide.next(p); if (gi >= 0 && Guide.steps().get(gi).dim == 0) { int gid = Guide.steps().get(gi).ids[0], gn = Guide.steps().get(gi).amount; b.brain.job = Brain.Job.NONE; b.add(new ItemStack(gid, gn, 0)); b.giveTo(p, gid, gn); } } // as if you'd made it: handed over, so the step is done
+                step = 54; stepStart = System.currentTimeMillis();
+                return;
+            }
+            case 54: {
+                BotEntity b = bot(w);
+                boolean nice = b.brain.lastReport.startsWith("Nice");
+                if (!nice && inStep() < 240000) return;
+                check(nice, "guide: the step done is noticed: \"" + b.brain.lastReport + "\"" + (nice ? "" : "; " + b.brain.statusLine()));
+                // with nothing from you (keeping house), a bot works through the guide on its own
+                b.brain.mode = Brain.Mode.HOME; b.brain.job = Brain.Job.NONE; b.brain.guideDone.clear(); b.brain.guideRest = 0; b.brain.guideTries = 0;
+                step = 57; stepStart = System.currentTimeMillis();
+                return;
+            }
+            case 57: {
+                BotEntity b = bot(w);
+                boolean working = b.brain.job == Brain.Job.GATHER || b.brain.job == Brain.Job.HUNT;
+                if (!working && inStep() < 15000) return;
+                check(working, "guide: left to itself it works on its own next step: " + b.brain.statusLine());
+                // infinite progression: with every step done it keeps going (mining, wood, building by home, exploring)
+                b.brain.job = Brain.Job.NONE;
+                for (int i = 0; i < Guide.steps().size(); i++) b.brain.guideDone.add(i);
+                b.brain.guideRest = 0;
+                boolean more = Guide.work(b.brain) && b.brain.job != Brain.Job.NONE;
+                check(more, "guide: with every step done it keeps going: " + b.brain.statusLine());
+                // names over the bots (on by default): drawn with the switch on, none with it off
+                BotConfig.nametags = true;
+                b.brain.mode = Brain.Mode.STAY; b.brain.job = Brain.Job.NONE;
+                tagsBefore = BotList.tagsDrawn;
+                step = 55; stepStart = System.currentTimeMillis();
+                return;
+            }
+            case 55: {
+                BotEntity b = bot(w);
+                camera(p, b);
+                if (tagsOn < 0 && inStep() > 3000) { tagsOn = BotList.tagsDrawn - tagsBefore; BotConfig.nametags = false; tagsBefore = BotList.tagsDrawn; }
+                if (inStep() < 6000) return;
+                int off = BotList.tagsDrawn - tagsBefore;
+                BotConfig.nametags = true;
+                check(tagsOn > 0 && off == 0, "names over the bots: drawn " + tagsOn + " times in 3 s with the switch on, " + off + " with it off");
+                // bot chat levels: replies lets an answer through but not an update; off lets nothing through
+                BotConfig.botChat = "replies";
+                b.brain.replyUntil = 0;
+                spokenBefore = b.brain.spoken;
+                b.brain.say("Just an update on what I'm doing.");
+                updateLeaked = b.brain.spoken != spokenBefore;
+                spokenBefore = b.brain.spoken;
+                say(p, "Tess what next?");
+                step = 58; stepStart = System.currentTimeMillis();
+                return;
+            }
+            case 58: {
+                BotEntity b = bot(w);
+                if (inStep() < 2000) return;
+                if (!offAsked) { answered = b.brain.spoken > spokenBefore; BotConfig.botChat = "off"; spokenBefore = b.brain.spoken; say(p, "Tess what next?"); offAsked = true; return; }
+                if (inStep() < 5000) return;
+                boolean silent = b.brain.spoken == spokenBefore;
+                BotConfig.botChat = "all";
+                check(!updateLeaked && answered && silent, "bot chat: replies keeps updates quiet (" + !updateLeaked + ") and answers (" + answered + "); off says nothing (" + silent + ")");
+                // bots join you by themselves (autoSpawn, 3 as in Tekkit): your bots made up to 3
+                Bots.spawnUpTo(p);
+                int mine = 0;
+                for (BotEntity x : Bots.bots(w)) if (x.owner.equals(p.name)) mine++;
+                check(mine >= Math.min(BotConfig.autoSpawn, BotConfig.maxBotsPerPlayer), "auto spawn: " + mine + " bots of yours, autoSpawn " + BotConfig.autoSpawn);
                 finish(mc);
                 return;
             }

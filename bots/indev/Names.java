@@ -9,6 +9,8 @@ public final class Names {
 
     /** Indev has crafting tables, chests and furnaces: bots craft. */
     static final boolean CRAFTING = true;
+    /** Indev counts yaw as Alpha does (0 faces +z). */
+    static final double YAW_OFFSET = 0;
 
     private static final String[] NAMES = new String[400];
     static {

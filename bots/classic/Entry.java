@@ -31,6 +31,7 @@ public final class Entry {
         }
         tWas = t; slashWas = slash;
         VoiceChat.tick(mc.world != null && mc.screen == null, mc.player, new java.io.File(".")); // optional voice chat (the game runs in .minecraft)
+        if (mc.world != null && mc.screen == null) BotList.nametags(mc); // names over the bots (nametags=true by default)
         if (mc.world != null && mc.screen == null && Keyboard.isCreated() && Keyboard.isKeyDown(Keyboard.KEY_TAB)) BotList.draw(mc); // hold Tab: the bots
     }
 

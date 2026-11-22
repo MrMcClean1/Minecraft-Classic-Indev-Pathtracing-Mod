@@ -4,7 +4,7 @@
 param([string]$From = 'C:\MinecraftBetaRaytracing\alphapt\src\main\java\com\mrmcclean\betapt\bots')
 $ErrorActionPreference = 'Stop'
 $to = "$PSScriptRoot\src\com\mrmcclean\classicpt\bots"
-$shared = 'Blueprint', 'BotConfig', 'BotEntity', 'Brain', 'MachineDoctor', 'Model', 'Nav', 'Orders', 'TestQuiet', 'Town', 'Voice', 'VoiceChat', 'Want'
+$shared = 'Blueprint', 'BotConfig', 'BotEntity', 'Brain', 'MachineDoctor', 'Model', 'Nav', 'Orders', 'TestQuiet', 'Town', 'Voice', 'VoiceChat', 'Guide', 'Want'
 New-Item -ItemType Directory -Force $to | Out-Null
 foreach ($n in $shared) {
   $t = [IO.File]::ReadAllText("$From\$n.java")

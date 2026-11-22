@@ -25,7 +25,7 @@ public final class Hooks {
             game = Game.of(owner);
             if (game == null) { broken = true; return false; }
             tracer = new Tracer(game);
-            enabled = tracer.settings.startOn; // `enabled` in classicpt.properties: on from the start (off by default)
+            enabled = tracer.settings.startOn; // `enabled` in classicpt.properties: on from the start (on by default)
             log("loaded for " + game.name + "; F7 turns the path tracer on and off");
             Test.init(game);
         }
