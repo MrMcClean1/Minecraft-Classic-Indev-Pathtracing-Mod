@@ -502,7 +502,7 @@ public final class BotTest {
                 p.setPositionAndAngles(p.x, p.y + 30, p.z, p.yaw, 0); // up 30 blocks
                 return;
             }
-            case 60: { // player invulnerability (on by default): a 30-block fall, then lava at the feet; the switch alone keeps the player alive
+            case 60: { // player invulnerability (off by default): a 30-block fall, then lava at the feet; the switch alone keeps the player alive
                 invLow = Math.min(invLow, p.health);
                 if (inStep() < 5000) return;
                 if (lava == null) { lava = new int[]{(int) Math.floor(p.x), (int) Math.floor(p.y - 1.62 + 0.01), (int) Math.floor(p.z)}; invLanded = p.health; w.setBlock(lava[0], lava[1], lava[2], 11); return; }
