@@ -207,6 +207,8 @@ public final class BotTest {
                 double sd = b == null ? 99 : Math.sqrt((b.x - p.x) * (b.x - p.x) + (b.z - p.z) * (b.z - p.z));
                 check(b != null && sd < 4, "/bot spawn Tess: a bot by the player" + (b == null ? "" : String.format(" (%.1f blocks across)", sd)));
                 if (b != null) note(String.format("player %.1f %.1f %.1f, bot %.1f %.1f %.1f", p.x, p.y, p.z, b.x, b.y, b.z));
+                // a new bot gets on with things on its own; the rest of the test orders Tess about, so she follows from here
+                if (b != null) { check(b.brain.mode == Brain.Mode.AUTO, "a new bot is on its own by default (" + b.brain.mode + ")"); b.brain.mode = Brain.Mode.FOLLOW; b.brain.job = Brain.Job.NONE; b.brain.after = Brain.Job.NONE; b.brain.want = null; b.stopMoving(); }
                 if (b == null) { finish(mc); return; }
                 step = 40; stepStart = System.currentTimeMillis(); // a picture of it first
                 return;
@@ -378,6 +380,7 @@ public final class BotTest {
                 if (r == null && inStep() < 60000) return;
                 check(r != null && r.startsWith("PASS"), r == null ? "voice: no answer in 60 s" : r.substring(5));
                 // the progression guide (on by default): "what next?", "help me with that", and "Nice" once the step is done
+                Guide.done.remove(p.name); // a fresh start each run: the guide file keeps a player's steps (Classic 0.30 has only 5, all done after one run)
                 BotEntity b = bot(w);
                 if (b == null) { finish(mc); return; }
                 BotConfig.progressionGuide = true;
@@ -460,11 +463,31 @@ public final class BotTest {
                 boolean silent = b.brain.spoken == spokenBefore;
                 BotConfig.botChat = "all";
                 check(!updateLeaked && answered && silent, "bot chat: replies keeps updates quiet (" + !updateLeaked + ") and answers (" + answered + "); off says nothing (" + silent + ")");
-                // bots join you by themselves (autoSpawn, 3 as in Tekkit): your bots made up to 3
+                // bots join you by themselves (autoSpawn, 3 as in Tekkit): your bots made up to 3, on their own; then a town of their own
                 Bots.spawnUpTo(p);
+                say(p, "Tess do your own thing");
+                step = 59; stepStart = System.currentTimeMillis();
+                return;
+            }
+            case 59: {
+                if (inStep() < 7000) return; // each new one picks a home and starts on something
                 int mine = 0;
-                for (BotEntity x : Bots.bots(w)) if (x.owner.equals(p.name)) mine++;
+                boolean own = true;
+                StringBuilder what = new StringBuilder();
+                for (BotEntity x : Bots.bots(w)) if (x.owner.equals(p.name)) {
+                    mine++;
+                    if (x.botName().equals("Tess")) continue;
+                    own &= x.brain.mode == Brain.Mode.AUTO && (x.hasHome || x.brain.job != Brain.Job.NONE);
+                    what.append(x.botName()).append(": ").append(x.brain.statusLine()).append(x.hasHome ? " (home set)" : "").append("; ");
+                }
                 check(mine >= Math.min(BotConfig.autoSpawn, BotConfig.maxBotsPerPlayer), "auto spawn: " + mine + " bots of yours, autoSpawn " + BotConfig.autoSpawn);
+                check(own && mine > 1, "on their own from the start (no orders): " + what);
+                BotEntity t = bot(w);
+                check(t != null && t.brain.mode == Brain.Mode.AUTO, "\"do your own thing\" sends a bot back to its own work" + (t == null ? "" : ": " + t.brain.statusLine()));
+                for (BotEntity x : Bots.bots(w)) x.brain.townLeft = false; // the town steps called Tess off one earlier
+                String town = Bots.autoTown(p);
+                int in = 0; for (BotEntity x : Bots.bots(w)) if (x.owner.equals(p.name) && x.brain.town != null) in++;
+                check(town != null && in >= 3, "a town founds itself with " + in + " bots on their own: " + town);
                 finish(mc);
                 return;
             }
