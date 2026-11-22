@@ -9,7 +9,7 @@ final class BotsClient {
     /** Set by Classic PT: shows a line in the game's chat. */
     static java.util.function.Consumer<String> chat;
 
-    static void show(String msg) { if (chat != null) chat.accept(msg); }
+    static void show(String msg) { VoiceChat.shown(msg); if (chat != null) chat.accept(msg); }
 
     static String name(int id) { return null; }
 

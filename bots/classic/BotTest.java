@@ -367,7 +367,16 @@ public final class BotTest {
                 if (inStep() < 3000) return;
                 BotEntity b = bot(w);
                 check(b != null && b.ticks > ticksBefore + 20, "the loaded level runs the bot (" + (b == null ? "no bot" : (b.ticks - ticksBefore) + " ticks") + ")");
+                step = 50; stepStart = System.currentTimeMillis();
+                VoiceChat.testVoice(new File("."), "Tess"); // voice chat: a line to speech (Piper) and back (Whisper), off the game's thread
+                return;
+            }
+            case 50: {
+                String r = VoiceChat.testResult;
+                if (r == null && inStep() < 60000) return;
+                check(r != null && r.startsWith("PASS"), r == null ? "voice: no answer in 60 s" : r.substring(5));
                 finish(mc);
+                return;
             }
         }
     }
