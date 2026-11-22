@@ -23,8 +23,9 @@ final class Settings {
     static final String[] DENOISERS = {"OFF", "Standard", "Advanced"};
     static final String[] LOOKS = {"Beta", "Traced", "Realistic"};
     static final String[] VIEWS = {"Path traced", "Colours", "Normals", "Light"};
-    static final int UPSCALER_BASIC = 0, UPSCALER_DLSS = 1;
-    static final int FX_WAVING = 16, FX_WAVES = 32, FX_CLOUDS = 64; // trace.comp, the same bits as Alpha/Beta
+    static final int UPSCALER_BASIC = 0, UPSCALER_DLSS = 1, UPSCALER_FSR = 2;
+    // trace.comp, the same bits as Alpha/Beta (pt_base.glsl) where they have them
+    static final int FX_SPARKLE = 4, FX_GODRAYS = 8, FX_WAVING = 16, FX_WAVES = 32, FX_CLOUDS = 64, FX_FASTLEAVES = 128;
 
     int preset = 1, denoiser = 2, look = 1, view = 0;
     int bounces = 2, samples = 2;
@@ -43,8 +44,15 @@ final class Settings {
     static final float MAX_APERTURE = 0.5f;
     boolean timelapseEnabled = false, timelapseVideo = true;
     int timelapseFrames = 120, timelapseFps = 30;
+    /** On when the game starts (`enabled`; off by default here, where the others start on). */
+    boolean startOn = false;
+    /** Optional effects, off by default here: sun shafts, snow and ice glinting in the sun, solid (Fast) leaves. */
+    boolean godRays = false, snowSparkle = false, fastLeaves = false;
 
-    int effects() { return (waving ? FX_WAVING : 0) | (waves ? FX_WAVES : 0) | (clouds ? FX_CLOUDS : 0); }
+    int effects() {
+        return (waving ? FX_WAVING : 0) | (waves ? FX_WAVES : 0) | (clouds ? FX_CLOUDS : 0) | (godRays ? FX_GODRAYS : 0)
+                | (snowSparkle ? FX_SPARKLE : 0) | (fastLeaves ? FX_FASTLEAVES : 0);
+    }
 
     /** The presets set samples, bounces and render scale, as in the other tracers. */
     void applyPreset(int p) {
@@ -87,7 +95,7 @@ final class Settings {
         if (p.getProperty("heldLights") != null) heldLight = i(p, "heldLights", 2) > 0; // 0 off, 1 yours, 2 everyone's (single player: the same)
         else heldLight = b(p, "heldLight", heldLight);
         String up = String.valueOf(p.getProperty("upscaler")).trim();
-        upscaler = "dlss".equalsIgnoreCase(up) ? UPSCALER_DLSS : UPSCALER_BASIC;
+        upscaler = "dlss".equalsIgnoreCase(up) ? UPSCALER_DLSS : "fsr".equalsIgnoreCase(up) ? UPSCALER_FSR : UPSCALER_BASIC;
         lowLatency = Math.max(0, Math.min(2, i(p, "lowLatency", lowLatency)));
         rayReconstruction = b(p, "rayReconstruction", rayReconstruction); frameGeneration = b(p, "frameGeneration", frameGeneration);
         sharpen = Math.max(0f, Math.min(1f, f(p, "sharpen", sharpen)));
@@ -99,6 +107,10 @@ final class Settings {
         timelapseFrames = Math.max(2, Math.min(100000, i(p, "timelapse.frames", timelapseFrames)));
         timelapseFps = Math.max(1, Math.min(240, i(p, "timelapse.fps", timelapseFps)));
         timelapseVideo = b(p, "timelapse.video", timelapseVideo);
+        startOn = b(p, "enabled", startOn);
+        godRays = b(p, "fx.godRays", godRays);
+        snowSparkle = b(p, "fx.snowSparkle", snowSparkle);
+        if (p.getProperty("leaves") != null) fastLeaves = "fast".equalsIgnoreCase(p.getProperty("leaves").trim());
         renderScale = Math.max(0.25f, Math.min(1f, renderScale));
         if ("off".equalsIgnoreCase(up)) renderScale = 1f; // the others' "off": native size
         bounces = Math.max(1, Math.min(4, bounces));
@@ -115,7 +127,9 @@ final class Settings {
         p.setProperty("cloudShadows", "" + cloudShadows); p.setProperty("fogDistance", "" + fogDistance); p.setProperty("traceDistance", "" + traceDistance);
         p.setProperty("reflections", reflections ? "1" : "0"); p.setProperty("fx.wavingPlants", "" + waving); p.setProperty("fx.waterWaves", "" + waves);
         p.setProperty("clouds", "" + clouds); p.setProperty("heldLights", heldLight ? "2" : "0");
-        p.setProperty("upscaler", upscaler == UPSCALER_DLSS ? "dlss" : "basic"); p.setProperty("lowLatency", "" + lowLatency);
+        p.setProperty("upscaler", upscaler == UPSCALER_DLSS ? "dlss" : upscaler == UPSCALER_FSR ? "fsr" : "basic"); p.setProperty("lowLatency", "" + lowLatency);
+        p.setProperty("enabled", "" + startOn); p.setProperty("fx.godRays", "" + godRays); p.setProperty("fx.snowSparkle", "" + snowSparkle);
+        p.setProperty("leaves", fastLeaves ? "fast" : "fancy");
         p.setProperty("rayReconstruction", "" + rayReconstruction); p.setProperty("frameGeneration", "" + frameGeneration);
         p.setProperty("photo.enabled", "" + photoEnabled); p.setProperty("photo.samples", "" + photoSamples); p.setProperty("photo.aperture", "" + photoAperture);
         p.setProperty("timelapse.enabled", "" + timelapseEnabled); p.setProperty("timelapse.frames", "" + timelapseFrames);
@@ -125,7 +139,8 @@ final class Settings {
             p.store(o, "Classic PT (path tracer) settings, the same names as the other path tracers'. Keys: F7 on/off, F4 preset, F9 denoiser,"
                     + " F10 look, F6 photo (photo.enabled), Home view, Page Down time-lapse keyframe, Page Up record (timelapse.enabled)."
                     + " preset 0-2 Fast/Standard/Fancy, renderScale 0.25-1, fogDistance 0 = off, traceDistance 0 = Auto, sharpen 0-1;"
-                    + " photo.aperture 0-0.5 blocks (depth of field); NVIDIA RTX: upscaler basic/dlss, rayReconstruction, frameGeneration,"
+                    + " photo.aperture 0-0.5 blocks (depth of field); enabled = on at start; upscaler basic/fsr/dlss (FSR 3.1, any GPU);"
+                    + " fx.godRays, fx.snowSparkle, leaves fast/fancy; NVIDIA RTX: rayReconstruction, frameGeneration,"
                     + " lowLatency 0-2 (2 = Reflex)");
             o.close();
         } catch (Exception ignored) {

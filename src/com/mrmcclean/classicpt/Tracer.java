@@ -45,6 +45,10 @@ final class Tracer {
     private int jitterFrame;
     private float jitX, jitY;
     boolean dlssActive, rrActive, rrFailed; // what made the last frame's picture; RR off after it refused (until F7)
+    /** AMD FSR 3.1 (upscaler=fsr, any GPU): the other tracers' port, fed the same depth and motion DLSS gets. */
+    private final Fsr3 fsr = new Fsr3();
+    boolean fsrActive;
+    int fsrFrames;
     int dlssFrames, rrFrames;              // frames DLSS / Ray Reconstruction made
     private final int[] geomTex = new int[2], accumTex = new int[2], tmpTex = new int[2];
     private int outW, outH, frame, history, cur;
@@ -347,6 +351,7 @@ final class Tracer {
         boolean nvUp = VkBridge.wanted(st) && VkBridge.ensure(st);
         boolean dlssFrame = nvUp && st.upscaler == Settings.UPSCALER_DLSS && !photo && st.view == 0 && VkBridge.dlssReady();
         boolean rrFrame = dlssFrame && st.rayReconstruction && !rrFailed && VkBridge.rrReady();
+        boolean fsrFrame = !dlssFrame && st.upscaler == Settings.UPSCALER_FSR && !photo && st.view == 0 && !fsr.failed();
         int tw = Math.max(16, Math.round(w * st.renderScale)), th = Math.max(16, Math.round(h * st.renderScale));
         if (dlssFrame) { // DLSS takes render sizes in a range per mode
             int[] ds = nvSizes(rrFrame, w, h);
@@ -356,6 +361,7 @@ final class Tracer {
         if ((st.lowLatency == 2 || st.frameGeneration) && VkBridge.reflexOn()) { VkBridge.reflexFrame(0); VkBridge.reflexFrame(1); VkBridge.reflexFrame(2); }
         else if (st.lowLatency >= 1) GL11.glFinish(); // low latency: no frame waits in line
         if (dlssFrame) { jitterFrame++; jitX = halton(jitterFrame, 2, tw, w) - 0.5f; jitY = halton(jitterFrame, 3, tw, w) - 0.5f; }
+        else if (fsrFrame) { float[] j = Fsr3.jitter(jitterFrame++, tw, w); jitX = j[0]; jitY = j[1]; }
         else { jitX = 0f; jitY = 0f; }
 
         // camera (Classic and Indev: pitch down is positive, yaw turns from -z toward +x)
@@ -400,7 +406,7 @@ final class Tracer {
         float held = st.heldLight && g.holdingTorch() ? 1f : 0f;
         GL20.glUniform4f(loc(prog, "uHeld"), v[0] + rx * 0.4f, v[1] - 0.3f, v[2] + rz * 0.4f, held);
         GL20.glUniform2f(loc(prog, "uJitter"), jitX, jitY);
-        GL20.glUniform1i(loc(prog, "uPointSample"), dlssFrame ? 1 : 0);
+        GL20.glUniform1i(loc(prog, "uPointSample"), dlssFrame || fsrFrame ? 1 : 0);
         GL20.glUniform2f(loc(prog, "uDof"), photo ? st.photoAperture : 0f, focus);
         GL20.glUniform1f(loc(prog, "uMaxDist"), st.traceDistance > 0 ? st.traceDistance : 600f);
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
@@ -481,7 +487,15 @@ final class Tracer {
         GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT | GL42.GL_TEXTURE_UPDATE_BARRIER_BIT);
 
         int shown = outTex;
-        if (st.sharpen > 0.001f && !photo && !dlssFrame) { // sharpening (AMD RCAS, as the other tracers); photos as traced
+        fsrActive = false;
+        if (fsrFrame) { // FSR 3.1 builds the window-sized picture from the jittered frames (and does its own sharpening)
+            dlssInputs(camNow, pc, tan, aspect, tw, th, gx, gy);
+            if (fsr.dispatch(outTex, depthTex, motionTex, tw, th, w, h, jitX, jitY, tan, NEAR, (float) (Math.max(1.0, lastMs) / 1000.0), st.sharpen, nvReset)) {
+                shown = fsr.output(); fsrActive = true; fsrFrames++;
+            }
+            GL20.glUseProgram(0);
+        }
+        if (st.sharpen > 0.001f && !photo && !dlssFrame && !fsrActive) { // sharpening (AMD RCAS, as the other tracers); photos as traced
             GL20.glUseProgram(progRcas);
             GL20.glUniform2i(loc(progRcas, "uSize"), tw, th);
             GL20.glUniform1f(loc(progRcas, "uSharpness"), (float) Math.pow(2.0, -2.0 * (1.0 - Math.min(1f, st.sharpen))));

@@ -49,6 +49,7 @@ final class Test {
     private static final List<String> lines = new ArrayList<String>();
     private static int passed, failed;
     private static int[] placed;
+    private static int placedId = 41; // what was put there last: gold, then a leaf block for the Fast leaves check
 
     static boolean running() { return on && !done; }
 
@@ -122,10 +123,11 @@ final class Test {
     static void beforeTrace(float a) {
         if (!running() || g.level() == null || g.player() == null) return;
         if (!placedOnTop) { placedOnTop = true; onTop(); } // the saved level may have left the player in a cave
-        g.setView(135f, 18f); // look over the level, a little down
+        if (towardSun) g.setView(137f - (g.indev ? 180f : 0f), -15f); // the god rays check: toward the sun (Indev's view turns by 180)
+        else g.setView(135f, 18f); // look over the level, a little down
         switch (stage) {
             case 0: // let the game build its picture of the level
-                if (++wait > 150) { stage = 1; wait = 0; Hooks.enabled = false; }
+                if (++wait > 300) { stage = 1; wait = 0; Hooks.enabled = false; } // after the move to the surface, the game redraws its picture there
                 break;
             case 1:
                 if (++wait > 30) { game = grab(); stage = 2; wait = 0; Hooks.enabled = true; Hooks.tracer.resetHistory(); }
@@ -232,9 +234,82 @@ final class Test {
                 TimeLapse.keys.clear(); TimeLapse.keys.addAll(keptKeys);
                 Settings s = t.settings;
                 s.timelapseEnabled = keptTl; s.timelapseFrames = keptTlFrames; s.photoSamples = keptSamples;
-                finish(null);
+                optionsStart(t);
                 break;
             }
+            case 40: { // FSR 3.1: 60 frames it made, against the native traced picture
+                if (!(t.fsrActive && t.fsrFrames >= 60) && ++wait < 900) break;
+                if (t.fsrActive) fsrPic = grab();
+                check(t.fsrFrames >= 60 && fsrPic != null, "FSR 3.1 upscaling made " + t.fsrFrames + " frames (render scale 50%, " + t.renderSize() + ")");
+                rtxPicture(fsrPic, "FSR 3.1");
+                Settings s = t.settings;
+                s.upscaler = keptUpscaler; s.renderScale = keptScale;
+                towardSun = true; // from the next frame
+                plain = null; t.resetHistory();
+                stage = 41; wait = 0;
+                break;
+            }
+            case 41: // toward the sun (where god rays show), without them, settled
+                if (t.history() < 48 && ++wait < 600) break;
+                plain = grab();
+                t.settings.godRays = true; t.resetHistory();
+                stage = 42; wait = 0;
+                break;
+            case 42: { // god rays on
+                if (t.history() < 48 && ++wait < 600) break;
+                BufferedImage gr = grab();
+                double d = diff(plain, gr), m0 = stats(plain)[0], m1 = stats(gr)[0];
+                check(d > 0.002 && m1 >= m0, String.format("god rays change the picture and add light (difference %.4f, mean %.0f to %.0f)", d, m0, m1));
+                godPic = gr;
+                t.settings.godRays = false;
+                towardSun = false;
+                // a leaf block where the gold block was, for Fast leaves
+                if (placed != null) { g.setTile(placed[0], placed[1], placed[2], 18); placedId = 18; }
+                t.resetHistory();
+                stage = 43; wait = 0;
+                break;
+            }
+            case 43: // fancy leaves, settled
+                if (t.history() < 48 && ++wait < 600) break;
+                plain = grab();
+                t.settings.fastLeaves = true; t.resetHistory();
+                stage = 44; wait = 0;
+                break;
+            case 44: { // Fast leaves
+                if (t.history() < 48 && ++wait < 600) break;
+                BufferedImage fl = grab();
+                double d = diff(plain, fl);
+                check(d > 0.001, String.format("Fast leaves change how a leaf block looks (difference %.4f)", d));
+                leavesPic = fl;
+                t.settings.fastLeaves = false;
+                // a patch of snow at the leaf block's spot, where this version has snow
+                boolean snow = t.faces != null && t.faces.length > 78 && t.faces[78] != null;
+                if (snow && placed != null) for (int dx = -2; dx <= 2; dx++) for (int dz = -2; dz <= 2; dz++)
+                    g.setTile(Math.max(0, Math.min(g.sizeX() - 1, placed[0] + dx)), placed[1], Math.max(0, Math.min(g.sizeZ() - 1, placed[2] + dz)), 78);
+                if (!snow) note("snow sparkle: no snow block (id 78) in " + g.name + ", so nothing to sparkle; the setting is still read");
+                t.resetHistory();
+                stage = snow ? 45 : 47; wait = 0;
+                break;
+            }
+            case 45: // snow, settled
+                if (t.history() < 48 && ++wait < 600) break;
+                plain = grab();
+                t.settings.snowSparkle = true; t.resetHistory();
+                stage = 46; wait = 0;
+                break;
+            case 46: { // snow sparkle on: glints show only where a texel's tilt sends the sun toward the camera
+                if (t.history() < 48 && ++wait < 600) break;
+                BufferedImage sp = grab();
+                double[] st = stats(sp);
+                note(String.format("snow sparkle: picture difference %.4f against no sparkle (glints depend on the sun's angle to the view)", diff(plain, sp)));
+                check(st[0] > 25 && st[0] < 235, "the picture stays sane with snow sparkle on (mean " + Math.round(st[0]) + ")");
+                t.settings.snowSparkle = false;
+                stage = 47; wait = 0;
+                break;
+            }
+            case 47: // a few traced frames so the GPU's copy has every change the steps above made, then the report
+                if (++wait > 30) finish(null);
+                break;
             default:
                 break;
         }
@@ -250,6 +325,28 @@ final class Test {
         int x = nx / 2, z = nz / 2;
         for (int y = ny - 1; y >= 0; y--)
             if (b[(y * nz + z) * nx + x] != 0) { g.setPos(x + 0.5f, y + 1 + 1.62f, z + 0.5f); note("player put on the surface at " + x + " " + (y + 1) + " " + z); return; }
+    }
+
+    // ---- the optional effects, FSR and start-on
+    private static BufferedImage fsrPic, plain, godPic, leavesPic;
+    private static boolean towardSun;
+
+    private static void optionsStart(Tracer t) {
+        Settings dflt = new Settings();
+        check(!dflt.startOn && !dflt.godRays && !dflt.snowSparkle && !dflt.fastLeaves && dflt.upscaler == Settings.UPSCALER_BASIC,
+                "on-at-start, god rays, snow sparkle, Fast leaves and FSR are off by default");
+        java.util.Properties p = new java.util.Properties();
+        p.setProperty("enabled", "true"); p.setProperty("fx.godRays", "true"); p.setProperty("fx.snowSparkle", "true");
+        p.setProperty("leaves", "fast"); p.setProperty("upscaler", "fsr");
+        Settings a = new Settings();
+        a.apply(p);
+        check(a.startOn && a.godRays && a.snowSparkle && a.fastLeaves && a.upscaler == Settings.UPSCALER_FSR,
+                "classicpt.properties reads enabled, fx.godRays, fx.snowSparkle, leaves and upscaler=fsr");
+        Settings s = t.settings;
+        keptScale = s.renderScale; keptUpscaler = s.upscaler;
+        s.upscaler = Settings.UPSCALER_FSR; s.renderScale = 0.5f;
+        t.resetHistory();
+        stage = 40; wait = 0;
     }
 
     // ---- photo mode and the time-lapse
@@ -400,7 +497,7 @@ final class Test {
         } else check(false, "the level reached the GPU");
         if (placed != null) {
             int i = (placed[1] * g.sizeZ() + placed[2]) * g.sizeX() + placed[0];
-            check(t.copy != null && (t.copy[i] & 255) == 41, "a block placed at " + placed[0] + " " + placed[1] + " " + placed[2] + " reached the GPU (" + t.layersUploaded + " layers re-sent)");
+            check(t.copy != null && (t.copy[i] & 255) == placedId, "a block placed at " + placed[0] + " " + placed[1] + " " + placed[2] + " reached the GPU (" + t.layersUploaded + " layers re-sent)");
         }
         if (game != null && traced != null) {
             double[] sg = stats(game), st = stats(traced);
@@ -434,6 +531,9 @@ final class Test {
             if (colours != null) ImageIO.write(colours, "png", new File(dir, "colours-view.png"));
             if (dlssPic != null) ImageIO.write(dlssPic, "png", new File(dir, "dlss.png"));
             if (rrPic != null) ImageIO.write(rrPic, "png", new File(dir, "rr.png"));
+            if (fsrPic != null) ImageIO.write(fsrPic, "png", new File(dir, "fsr.png"));
+            if (godPic != null) ImageIO.write(godPic, "png", new File(dir, "god-rays.png"));
+            if (leavesPic != null) ImageIO.write(leavesPic, "png", new File(dir, "fast-leaves.png"));
             if (game != null && traced != null) {
                 BufferedImage c = new BufferedImage(game.getWidth(), game.getHeight() * 2, BufferedImage.TYPE_INT_RGB);
                 c.getGraphics().drawImage(game, 0, 0, null);

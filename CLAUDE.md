@@ -26,4 +26,5 @@ NVIDIA: DLSS 5 (`kFeatureDLSS_NR`) has no Streamline plugin or header yet (SDK 2
 | DLSS, Ray Reconstruction, Frame Generation, Reflex | Effects > NVIDIA RTX | classicpt.properties `upscaler=dlss`, `rayReconstruction`, `frameGeneration`, `lowLatency=2` (off by default); DLLs in `.minecraft\betapt-nvidia` |
 | Vulkan side | VkLive (tracer + NVIDIA), VkBase, NvFeatures, VkPresent | `vk/`: VkNv (NVIDIA only, the OpenGL hand-off from VkLive), VkBase/NvFeatures/VkPresent copied with the package renamed: change both |
 | Vulkan hardware tracer, DeepDVC | yes | not ported (the tracer stays OpenGL compute) |
+| FSR 3.1, god rays, snow sparkle, Fast leaves, on at start | menu | `upscaler=fsr` (`Fsr3`, `Fsr3Bindings`, `FsrShaders`, AMD's shaders in assets/classicpt/fsr3, fed dlss_inputs' depth and motion), `fx.godRays`, `fx.snowSparkle`, `leaves=fast`, `enabled`: all off by default here |
 | Mobs in the trace, far terrain | yes | not yet |

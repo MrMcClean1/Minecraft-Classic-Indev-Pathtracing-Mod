@@ -23,6 +23,11 @@ records `timelapse.frames` pictures along a smooth path through them into `scree
 (`denoise`, `denoiser`, `look.realism`, `heldLights`, `sharpen`, `traceDistance`, `fx.wavingPlants`, `fx.waterWaves`...);
 older files still load.
 
+More optional settings, all off by default: `enabled=true` (the tracer on from the start), `upscaler=fsr` (AMD FSR 3.1,
+any GPU, the other tracers' port), `fx.godRays=true` (sun shafts), `leaves=fast` (solid leaves), `fx.snowSparkle=true`
+(snow and ice glint in the sun; neither Classic 0.30 nor Indev 20100223 has snow or ice blocks, so it only shows with
+a level that has them).
+
 ## NVIDIA RTX (opt-in)
 
 On an RTX card, as in the Alpha, Beta and Tekkit tracers, all off by default and set in `.minecraft\classicpt.properties`

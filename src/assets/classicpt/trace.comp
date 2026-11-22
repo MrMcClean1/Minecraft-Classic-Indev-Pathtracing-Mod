@@ -34,7 +34,7 @@ bool primaryWater;                // the camera ray's first surface was water (R
 const uint AIR = 0u, CUBE = 1u, CUTOUT = 2u, CROSS = 3u, WATER = 4u, LAVA = 5u, SLAB = 6u, TORCH = 7u, LOW = 8u;
 const uint EXIT = 65535u;         // leaving water (underwater rays)
 const int M_VIEW = 0, M_SHADOW = 1, M_UNDERWATER = 2;
-const int FX_WAVING = 16, FX_WAVES = 32, FX_CLOUDS = 64;      // the same bits as the Alpha/Beta tracers
+const int FX_SPARKLE = 4, FX_GODRAYS = 8, FX_WAVING = 16, FX_WAVES = 32, FX_CLOUDS = 64, FX_FASTLEAVES = 128; // the same bits as the Alpha/Beta tracers (FASTLEAVES: here only)
 const int VIEW_PATH = 0, VIEW_ALBEDO = 1, VIEW_NORMALS = 2, VIEW_LIGHT = 3;
 bool fxOn(int bit) { return (uEffects & bit) != 0; }
 
@@ -150,6 +150,8 @@ bool voxel(ivec3 c, uint id, vec3 ro, vec3 rd, float tIn, float tOut, int mode, 
         vec2 uv = faceUV(f, p);
         if (id == 18u) uv = fract(uv - swayUV(id, c, 1.0));
         vec4 tc = tileTex(info[id * 8u + 1u + uint(f)], uv);
+        // Fast leaves (leaves=fast): solid, the see-through pixels a dark leafy green, as Fast graphics draws them
+        if (id == 18u && fxOn(FX_FASTLEAVES)) { if (tc.a < 0.1) tc.rgb = vec3(0.10, 0.16, 0.06); tc.a = 1.0; }
         if (shape == CUTOUT && tc.a < 0.1) {
             // see-through pixel: the far side of the same block
             vec3 inv = 1.0 / rd;
@@ -326,7 +328,18 @@ vec3 radiance(vec3 ro, vec3 rd, out vec3 albedo, out vec3 normal, out float dist
         float nd = dot(h.n, uSunDir);
         if (nd > 0.0) {
             Hit s;
-            if (!trace(p + h.n * 1e-3, uSunDir, 600.0, M_SHADOW, s)) L += T * uSunColor * nd * cloudShade(p);
+            if (!trace(p + h.n * 1e-3, uSunDir, 600.0, M_SHADOW, s)) {
+                L += T * uSunColor * nd * cloudShade(p);
+                // snow sparkle (fx.snowSparkle): a few texels of snow and ice, each its own slightly tilted mirror
+                if (bounces == 0 && fxOn(FX_SPARKLE) && (h.id == 78u || h.id == 79u || h.id == 80u) && h.n.y > 0.5) {
+                    ivec3 sc = ivec3(floor(p * 16.0));
+                    uint hs = pcg(uint(sc.x) * 73856093u ^ uint(sc.y) * 19349663u ^ uint(sc.z) * 83492791u);
+                    if ((hs & 255u) < 16u) {
+                        vec3 jn = normalize(h.n + vec3(float((hs >> 8) & 255u) / 127.5 - 1.0, 0.0, float((hs >> 16) & 255u) / 127.5 - 1.0) * 0.45);
+                        L += T * uSunColor * pow(max(dot(reflect(rd, jn), uSunDir), 0.0), 150.0) * 4.0;
+                    }
+                }
+            }
         }
         L += T * blockLight(p, h.n);
         rd = cosineDir(h.n);
@@ -365,9 +378,23 @@ void main() {
         }
         vec3 a, nn; float d;
         vec3 r = radiance(ro, rd, a, nn, d);
+        // god rays (fx.godRays): sunlight scattered toward the camera by the air, from the parts of the camera ray the
+        // sun reaches (two jittered points), brightest looking toward the sun, as the other tracers' godRays()
+        vec3 godL = vec3(0.0);
+        if (fxOn(FX_GODRAYS) && uSunDir.y > 0.02 && !isWater(blockAt(ivec3(floor(ro))))) {
+            float gEnd = min(d > 0.0 ? d : 600.0, 40.0), vis = 0.0;
+            for (int k = 0; k < 2; k++) {
+                Hit gs;
+                if (!trace(ro + rd * (gEnd * (float(k) + rnd()) / 2.0), uSunDir, 600.0, M_SHADOW, gs)) vis += 0.5;
+            }
+            float cs = dot(rd, uSunDir);
+            const float g = 0.6;
+            float phase = (1.0 - g * g) / (12.5663706 * pow(1.0 + g * g - 2.0 * g * cs, 1.5));
+            godL = uSunColor * vis * phase * 0.006 * gEnd;
+        }
         // with depth of field the surface seen changes from sample to sample: the colour goes into the light (and is
         // averaged with it), the albedo stays white
-        c += uDof.x > 0.0 ? r * a : r;
+        c += uDof.x > 0.0 ? r * a + godL : r + godL / max(a, vec3(0.02)); // god rays aren't lit surfaces: the albedo is taken back out
         if (s == 0) { alb = a; n = nn; dist = d; water = primaryWater; }
     }
     c /= float(uSamples);
