@@ -412,7 +412,9 @@ final class Tracer {
         float fx = (float) (Math.sin(yaw) * Math.cos(pitch)), fy = (float) -Math.sin(pitch), fz = (float) (-Math.cos(yaw) * Math.cos(pitch));
         float rx = (float) Math.cos(yaw), rz = (float) Math.sin(yaw);
         float ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;  // right x forward
-        float[] camNow = {v[0], v[1], v[2], fx, fy, fz, rx, 0, rz, ux, uy, uz};
+        // both games pull the camera 0.1 back from the eye (glTranslatef(0, 0, -0.1) before turning): the same here, so
+        // the traced depth lines up with what the game draws over it (cracks and the outline lie right on a face)
+        float[] camNow = {v[0] - fx * 0.1f, v[1] - fy * 0.1f, v[2] - fz * 0.1f, fx, fy, fz, rx, 0, rz, ux, uy, uz};
         boolean nvReset = !historyValid || prevCam == null
                 || Math.abs(camNow[0] - prevCam[0]) + Math.abs(camNow[1] - prevCam[1]) + Math.abs(camNow[2] - prevCam[2]) > 8f;
         if (photo && prevCam != null && !Arrays.equals(prevCam, camNow)) { photo = false; photoTarget = null; photoThen = null; Hooks.say("Photo cancelled: the view moved"); }

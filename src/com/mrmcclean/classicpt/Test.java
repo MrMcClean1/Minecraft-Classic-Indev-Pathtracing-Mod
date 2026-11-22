@@ -124,7 +124,9 @@ final class Test {
         if (!running() || g.level() == null || g.player() == null) return;
         if (!placedOnTop) { placedOnTop = true; onTop(); } // the saved level may have left the player in a cave
         if (towardSun) g.setView(137f - (g.indev ? 180f : 0f), -15f); // the god rays check: toward the sun (Indev's view turns by 180)
+        else if (stage >= 50 && stage < 60) g.setView(135f, 89f); // the crack check: straight down at the block underfoot
         else g.setView(135f, 18f); // look over the level, a little down
+        if (stage >= 50 && stage < 60) crack(stage == 51 || stage == 53 ? 0.6f : 0f);
         switch (stage) {
             case 0: // let the game build its picture of the level
                 if (++wait > 300) { stage = 1; wait = 0; Hooks.enabled = false; } // after the move to the surface, the game redraws its picture there
@@ -288,7 +290,8 @@ final class Test {
                     g.setTile(Math.max(0, Math.min(g.sizeX() - 1, placed[0] + dx)), placed[1], Math.max(0, Math.min(g.sizeZ() - 1, placed[2] + dz)), 78);
                 if (!snow) note("snow sparkle: no snow block (id 78) in " + g.name + ", so nothing to sparkle; the setting is still read");
                 t.resetHistory();
-                stage = snow ? 45 : 47; wait = 0;
+                stage = snow ? 45 : 50; wait = 0;
+                if (!snow) Hooks.enabled = false;
                 break;
             }
             case 45: // snow, settled
@@ -304,9 +307,24 @@ final class Test {
                 note(String.format("snow sparkle: picture difference %.4f against no sparkle (glints depend on the sun's angle to the view)", diff(plain, sp)));
                 check(st[0] > 25 && st[0] < 235, "the picture stays sane with snow sparkle on (mean " + Math.round(st[0]) + ")");
                 t.settings.snowSparkle = false;
-                stage = 47; wait = 0;
+                stage = 50; wait = 0; Hooks.enabled = false;
                 break;
             }
+            // Block cracks while digging: the game draws them over the picture. Off (the game's own picture), then on.
+            case 50: if (++wait > 40) { crackOff = grab(); stage = 51; wait = 0; } break;
+            case 51: if (++wait > 10) { crackOn = grab(); stage = 52; wait = 0; Hooks.enabled = true; t.resetHistory(); } break;
+            case 52: if (t.history() >= 32 || ++wait > 600) { tracedCrackOff = grab(); stage = 53; wait = 0; } break;
+            case 53:
+                if (++wait > 10) {
+                    BufferedImage on = grab();
+                    double game = centreDiff(crackOff, crackOn), traced = centreDiff(tracedCrackOff, on);
+                    write("crack-game.png", crackOn);
+                    write("crack-traced.png", on);
+                    note(String.format("crack: the middle of the picture changes %.4f in the game's own picture, %.4f traced", game, traced));
+                    check(game > 0.002 && traced > game * 0.3, "block cracks show over the traced picture (crack-traced.png)");
+                    stage = 47; wait = 0;
+                }
+                break;
             case 47: // a few traced frames so the GPU's copy has every change the steps above made, then the report
                 if (++wait > 30) finish(null);
                 break;
@@ -314,6 +332,35 @@ final class Test {
                 break;
         }
     }
+
+    private static BufferedImage crackOff, crackOn, tracedCrackOff;
+
+    /** The game's dig progress (0 none, up to 1): Indev's renderer field a, Classic's renderer field i. */
+    private static void crack(float progress) {
+        try {
+            Object r = Game.field(g.mc.getClass(), "e").get(g.mc);
+            Game.field(r.getClass(), g.indev ? "a" : "i").setFloat(r, progress);
+        } catch (Exception e) {
+            note("crack: " + e);
+        }
+    }
+
+    /** Mean colour change in the middle third of two pictures (0..1). */
+    private static double centreDiff(BufferedImage a, BufferedImage b) {
+        if (a == null || b == null) return 0;
+        int w = a.getWidth(), h = a.getHeight(), n = 0;
+        double sum = 0;
+        for (int y = h / 3; y < 2 * h / 3; y += 2)
+            for (int x = w / 3; x < 2 * w / 3; x += 2) {
+                int p = a.getRGB(x, y), q = b.getRGB(x, y);
+                sum += Math.abs((p >> 16 & 255) - (q >> 16 & 255)) + Math.abs((p >> 8 & 255) - (q >> 8 & 255)) + Math.abs((p & 255) - (q & 255));
+                n += 3;
+            }
+        return sum / 255.0 / Math.max(1, n);
+    }
+
+    private static final List<Object[]> extraPics = new ArrayList<Object[]>();
+    private static void write(String name, BufferedImage img) { extraPics.add(new Object[]{name, img}); }
 
     private static boolean placedOnTop;
 
@@ -531,6 +578,7 @@ final class Test {
             if (colours != null) ImageIO.write(colours, "png", new File(dir, "colours-view.png"));
             if (dlssPic != null) ImageIO.write(dlssPic, "png", new File(dir, "dlss.png"));
             if (rrPic != null) ImageIO.write(rrPic, "png", new File(dir, "rr.png"));
+            for (Object[] e : extraPics) ImageIO.write((BufferedImage) e[1], "png", new File(dir, (String) e[0]));
             if (fsrPic != null) ImageIO.write(fsrPic, "png", new File(dir, "fsr.png"));
             if (godPic != null) ImageIO.write(godPic, "png", new File(dir, "god-rays.png"));
             if (leavesPic != null) ImageIO.write(leavesPic, "png", new File(dir, "fast-leaves.png"));
