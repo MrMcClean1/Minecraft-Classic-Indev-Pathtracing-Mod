@@ -182,6 +182,19 @@ final class Game {
         throw new NoSuchMethodException("set level");
     }
 
+    private Field health;
+
+    /** The player back to full health (Classic's Mob.health, Indev's mob field W): a test's player can't die. */
+    void keepAlive() {
+        Object p = player();
+        if (p == null) return;
+        try {
+            if (health == null) health = field(p.getClass(), indev ? "W" : "health");
+            if (health.getInt(p) < 20) health.setInt(p, 20);
+        } catch (Exception ignored) {
+        }
+    }
+
     void setView(float yaw, float pitch) {
         Object p = player();
         try {

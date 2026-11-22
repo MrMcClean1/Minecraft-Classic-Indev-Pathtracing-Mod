@@ -17,11 +17,12 @@ NVIDIA: DLSS 5 (`kFeatureDLSS_NR`) has no Streamline plugin or header yet (SDK 2
 | Preset | F4, Fast/Standard/Fancy | F4, same (samples, bounces, render scale) |
 | Denoiser | F9, OFF/Standard/Advanced (temporal + a-trous) | F9, same names and idea (temporal.comp, atrous.comp) |
 | Look | F10, Beta/Traced/Realistic | F10, same (compose.comp) |
-| Photo mode | F6 | F6, 512 frames, PNG in screenshots/ |
+| Photo mode | F6 when photo.enabled; samples, aperture (depth of field), sun time | F6 when `photo.enabled` (off by default), `photo.samples`, `photo.aperture` (thin lens in trace.comp, `uDof`); no sun time (one fixed sun) |
+| Time-lapse | Page Down keyframe, menu Record | Page Down keyframe, Page Up record (`timelapse.*`, off by default), `TimeLapse.java`; no time of day |
 | View | Home | Home (path traced, colours, normals, light) |
 | Effects bits | FX_WAVING 16, FX_WAVES 32 (pt_base.glsl) | same bits + FX_CLOUDS 64 |
 | Light colours, Fresnel, sway, waves | pt_base.glsl | copied into trace.comp: change both |
-| Cloud shadows, held torch light, brightness, reflections, bounces, render scale | settings screen | classicpt.properties (no mod menu in these versions) |
+| Cloud shadows, held torch light, brightness, reflections, bounces, render scale, sharpening, trace distance | settings screen | classicpt.properties (no mod menu in these versions), the same key names as betapt-settings.properties (`Settings.apply` still reads the older ones); option-by-version table in HANDOFF.md |
 | DLSS, Ray Reconstruction, Frame Generation, Reflex | Effects > NVIDIA RTX | classicpt.properties `upscaler=dlss`, `rayReconstruction`, `frameGeneration`, `lowLatency=2` (off by default); DLLs in `.minecraft\betapt-nvidia` |
 | Vulkan side | VkLive (tracer + NVIDIA), VkBase, NvFeatures, VkPresent | `vk/`: VkNv (NVIDIA only, the OpenGL hand-off from VkLive), VkBase/NvFeatures/VkPresent copied with the package renamed: change both |
 | Vulkan hardware tracer, DeepDVC | yes | not ported (the tracer stays OpenGL compute) |

@@ -26,6 +26,9 @@ import java.util.List;
  *    F7 toggle, and that a placed block reaches the GPU;
  *  - with the word rtx in the run file: NVIDIA DLSS super resolution (Performance, half size up to the window), then
  *    Ray Reconstruction, each checked against the native traced picture (dlss.png, rr.png);
+ *  - the settings file read with the other tracers' names; photo mode (two stills of 32 samples agree far better than
+ *    two of 4; depth of field changes the still); a short time-lapse (pictures, the camera put back, the MP4);
+ *  - music and sound are off while it runs (in memory only, as the other tests);
  *  - writes classicpt-test/<date>/report.txt, game.png, traced.png, compare.png, then closes the game.
  */
 final class Test {
@@ -59,7 +62,40 @@ final class Test {
         if (Museum.start(words)) return; // export / museum runs (the history museum)
         on = true;
         rtx = words.toLowerCase().contains("rtx");
+        mute(true);
         Hooks.log("test armed: " + g.name + (rtx ? " (with NVIDIA DLSS and Ray Reconstruction)" : ""));
+    }
+
+    // ---- quiet: the game's music and sound options (the first two switches of its options, as in options.txt) off
+    private static Object options;
+    private static java.lang.reflect.Field[] soundFields;
+    private static boolean[] keptSound;
+    private static String muteNote = "the game's options weren't found: not muted";
+
+    private static void mute(boolean on) {
+        try {
+            if (options == null) {
+                for (Class<?> k = g.mc.getClass(); k != null && options == null; k = k.getSuperclass())
+                    for (java.lang.reflect.Field f : k.getDeclaredFields()) {
+                        if (f.getType().isPrimitive() || f.getType().isArray() || f.getType().getName().startsWith("java")) continue;
+                        boolean file = false;
+                        List<java.lang.reflect.Field> bools = new ArrayList<java.lang.reflect.Field>();
+                        for (java.lang.reflect.Field o : f.getType().getDeclaredFields()) {
+                            if (o.getType() == File.class) file = true;
+                            if (o.getType() == boolean.class && !java.lang.reflect.Modifier.isStatic(o.getModifiers())) bools.add(o);
+                        }
+                        if (!file || bools.size() < 2) continue;
+                        f.setAccessible(true);
+                        options = f.get(g.mc);
+                        soundFields = new java.lang.reflect.Field[]{bools.get(0), bools.get(1)};
+                        for (java.lang.reflect.Field o : soundFields) o.setAccessible(true);
+                        break;
+                    }
+                if (options == null) { Hooks.log("test: the game's options weren't found, so it isn't muted"); return; }
+            }
+            if (on) { keptSound = new boolean[]{soundFields[0].getBoolean(options), soundFields[1].getBoolean(options)}; soundFields[0].setBoolean(options, false); soundFields[1].setBoolean(options, false); muteNote = "music and sound off while the test runs (options " + soundFields[0].getName() + ", " + soundFields[1].getName() + " were " + keptSound[0] + ", " + keptSound[1] + ")"; Hooks.log("test: " + muteNote); }
+            else if (keptSound != null) { soundFields[0].setBoolean(options, keptSound[0]); soundFields[1].setBoolean(options, keptSound[1]); }
+        } catch (Throwable t) { Hooks.log("test: couldn't mute: " + t); }
     }
 
     private static void check(boolean ok, String what) {
@@ -75,6 +111,7 @@ final class Test {
         if (!running()) return;
         frames++;
         if (Mouse.isCreated() && Mouse.isGrabbed()) Mouse.setGrabbed(false); // never take the mouse from MrMcClean
+        g.keepAlive();                                                      // nor let the test's player die
         g.closeScreen();                                                    // the pause menu a background window gets
         if (g.level() == null) {
             if (g.indev && frames > 100 && !generated) { generated = true; note("making a small level"); g.generateLevel(); }
@@ -84,6 +121,7 @@ final class Test {
 
     static void beforeTrace(float a) {
         if (!running() || g.level() == null || g.player() == null) return;
+        if (!placedOnTop) { placedOnTop = true; onTop(); } // the saved level may have left the player in a cave
         g.setView(135f, 18f); // look over the level, a little down
         switch (stage) {
             case 0: // let the game build its picture of the level
@@ -122,7 +160,7 @@ final class Test {
             case 4:
                 if (++wait > 60) {
                     afterBlock = grab();
-                    if (!rtx) { finish(null); break; }
+                    if (!rtx) { photoStart(t); break; }
                     Settings s = t.settings; // in memory only, put back before the report
                     keptScale = s.renderScale; keptUpscaler = s.upscaler; keptRr = s.rayReconstruction;
                     s.upscaler = Settings.UPSCALER_DLSS; s.renderScale = 0.5f; s.rayReconstruction = false;
@@ -146,12 +184,144 @@ final class Test {
                     Settings s = t.settings;
                     s.renderScale = keptScale; s.upscaler = keptUpscaler; s.rayReconstruction = keptRr;
                     t.resetHistory();
-                    finish(null);
+                    photoStart(t);
                 }
                 break;
+            case 20: case 21: case 22: case 23: case 24: { // photo mode: five stills
+                if (t.photo && ++wait < 3000) break;
+                File f = t.photoSaved == null ? null : new File(t.photoSaved);
+                shots[stage - 20] = f;
+                wait = 0;
+                Settings s = t.settings;
+                if (stage == 20) { check(f != null && f.isFile(), "photo mode saves a still (" + (f == null ? "none" : f.getName()) + ", focus " + Math.round(t.focus * 10) / 10.0 + " blocks)"); t.startPhoto(null, null); }
+                if (stage == 21) { noise32 = diff(read(shots[0]), read(shots[1])); s.photoSamples = 4; t.startPhoto(null, null); }
+                if (stage == 22) t.startPhoto(null, null);
+                if (stage == 23) {
+                    double d4 = diff(read(shots[2]), read(shots[3]));
+                    check(d4 > 0 && noise32 < d4 / 2.0, String.format("photo adds up to a noise-free still: difference between two stills %.4f at 32 samples, %.4f at 4", noise32, d4));
+                    s.photoSamples = 32; s.photoAperture = 0.2f; t.startPhoto(null, null);
+                }
+                if (stage == 24) {
+                    double d = diff(read(shots[0]), read(shots[4]));
+                    check(d > Math.max(0.004, noise32 * 2), String.format("depth of field changes the still (difference to the sharp one %.4f)", d));
+                    s.photoAperture = keptAperture; s.photoSamples = keptSamples; s.photoEnabled = keptPhoto;
+                    timeLapseStart(t);
+                    break;
+                }
+                stage++;
+                break;
+            }
+            case 30: { // the time-lapse records
+                if (TimeLapse.running() && ++wait < 6000) break;
+                if (TimeLapse.running()) TimeLapse.finish(g, false, t.settings);
+                File d = TimeLapse.lastDir;
+                int n = 0;
+                for (int i = 1; i <= 4; i++) if (d != null && new File(d, String.format("frame_%04d.png", i)).isFile()) n++;
+                check(n == 4, "time-lapse pictures saved, numbered: " + n + " of 4 (" + TimeLapse.status + ")");
+                float[] v = g.view(1f);
+                double moved = v == null || tlStart == null ? 99 : Math.abs(v[0] - tlStart[0]) + Math.abs(v[1] - tlStart[1]) + Math.abs(v[2] - tlStart[2]);
+                check(moved < 0.6, String.format("the camera is back where it was after the time-lapse (%.2f blocks off; the game's own gravity may move it a little)", moved));
+                stage = 31; wait = 0;
+                break;
+            }
+            case 31: { // the video
+                if (TimeLapse.encoding && ++wait < 3600) break;
+                File v = TimeLapse.lastVideo;
+                if (TimeLapse.status.startsWith("No ffmpeg")) note("time-lapse video: " + TimeLapse.status);
+                else check(v != null && v.isFile() && v.length() > 1000, "time-lapse video made by ffmpeg: " + TimeLapse.status);
+                TimeLapse.keys.clear(); TimeLapse.keys.addAll(keptKeys);
+                Settings s = t.settings;
+                s.timelapseEnabled = keptTl; s.timelapseFrames = keptTlFrames; s.photoSamples = keptSamples;
+                finish(null);
+                break;
+            }
             default:
                 break;
         }
+    }
+
+    private static boolean placedOnTop;
+
+    /** The player on the highest block in the middle of the level, eye 1.62 above it: an open view over the level. */
+    private static void onTop() {
+        byte[] b = g.blocks();
+        int nx = g.sizeX(), ny = g.sizeY(), nz = g.sizeZ();
+        if (b == null || nx <= 0) return;
+        int x = nx / 2, z = nz / 2;
+        for (int y = ny - 1; y >= 0; y--)
+            if (b[(y * nz + z) * nx + x] != 0) { g.setPos(x + 0.5f, y + 1 + 1.62f, z + 0.5f); note("player put on the surface at " + x + " " + (y + 1) + " " + z); return; }
+    }
+
+    // ---- photo mode and the time-lapse
+    private static final File[] shots = new File[5];
+    private static double noise32;
+    private static boolean keptPhoto, keptTl;
+    private static int keptSamples, keptTlFrames;
+    private static float keptAperture;
+    private static float[] tlStart;
+    private static final List<TimeLapse.Key> keptKeys = new ArrayList<TimeLapse.Key>();
+
+    private static void photoStart(Tracer t) {
+        Settings s = t.settings; // in memory only, put back before the report
+        // the settings file with the other tracers' names (and the older ones still read)
+        java.util.Properties p = new java.util.Properties();
+        p.setProperty("denoise", "false"); p.setProperty("look.realism", "1.0"); p.setProperty("heldLights", "0");
+        p.setProperty("fx.waterWaves", "false"); p.setProperty("upscaler", "off"); p.setProperty("photo.enabled", "true");
+        p.setProperty("timelapse.frames", "48"); p.setProperty("sharpen", "0.5"); p.setProperty("traceDistance", "96");
+        Settings a = new Settings();
+        a.renderScale = 0.5f;
+        a.apply(p);
+        check(a.denoiser == 0 && a.look == 2 && !a.heldLight && !a.waves && a.renderScale == 1f && a.photoEnabled && a.timelapseFrames == 48
+                && a.sharpen == 0.5f && a.traceDistance == 96, "classicpt.properties takes the other tracers' option names");
+        java.util.Properties old = new java.util.Properties();
+        old.setProperty("denoiser", "1"); old.setProperty("look", "0"); old.setProperty("heldLight", "false"); old.setProperty("wavingPlants", "true");
+        Settings b = new Settings();
+        b.apply(old);
+        check(b.denoiser == 1 && b.look == 0 && !b.heldLight && b.waving, "and still reads its own older names");
+        Settings dflt = new Settings();
+        check(!dflt.photoEnabled && !dflt.timelapseEnabled && dflt.sharpen == 0f && dflt.photoAperture == 0f, "photo mode, the time-lapse, sharpening and depth of field are off by default");
+        keptPhoto = s.photoEnabled; keptSamples = s.photoSamples; keptAperture = s.photoAperture;
+        s.photoEnabled = true; s.photoSamples = 32; s.photoAperture = 0f;
+        Hooks.enabled = true;
+        t.startPhoto(null, null);
+        stage = 20; wait = 0;
+    }
+
+    private static void timeLapseStart(Tracer t) {
+        Settings s = t.settings;
+        TimeLapse.ensureLoaded();
+        keptKeys.clear(); keptKeys.addAll(TimeLapse.keys);
+        keptTl = s.timelapseEnabled; keptTlFrames = s.timelapseFrames; keptSamples = s.photoSamples;
+        s.timelapseEnabled = true; s.timelapseFrames = 4; s.photoSamples = 8;
+        float[] v = g.view(1f);
+        tlStart = v;
+        float yaw = v[3] - (g.indev ? 180f : 0f);
+        double r = Math.toRadians(yaw);
+        float fx = (float) Math.sin(r), fz = (float) -Math.cos(r);
+        TimeLapse.keys.clear(); // in memory only: the player's own keyframe file is left alone
+        TimeLapse.keys.add(new TimeLapse.Key(v[0], v[1], v[2], yaw, v[4]));
+        TimeLapse.keys.add(new TimeLapse.Key(v[0] + fx * 2, v[1] + 1, v[2] + fz * 2, yaw + 20, v[4]));
+        TimeLapse.keys.add(new TimeLapse.Key(v[0] + fx * 4, v[1] + 2, v[2] + fz * 4, yaw - 25, v[4] + 5));
+        String m = TimeLapse.start(g, t);
+        check(TimeLapse.running(), "the time-lapse starts: " + m);
+        stage = 30; wait = 0;
+    }
+
+    private static BufferedImage read(File f) {
+        try { return f == null || !f.isFile() ? null : ImageIO.read(f); } catch (Exception e) { return null; }
+    }
+
+    /** Mean difference per channel (0..1) between two pictures of the same size; 1 if one is missing. */
+    private static double diff(BufferedImage a, BufferedImage b) {
+        if (a == null || b == null || a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) return 1;
+        double sum = 0; long n = 0;
+        for (int y = 0; y < a.getHeight(); y++)
+            for (int x = 0; x < a.getWidth(); x++) {
+                int p = a.getRGB(x, y), q = b.getRGB(x, y);
+                sum += Math.abs((p >> 16 & 255) - (q >> 16 & 255)) + Math.abs((p >> 8 & 255) - (q >> 8 & 255)) + Math.abs((p & 255) - (q & 255));
+                n += 3;
+            }
+        return sum / 255.0 / Math.max(1, n);
     }
 
     static BufferedImage grab() {
@@ -218,6 +388,7 @@ final class Test {
         if (done) return;
         Tracer t = Hooks.tracer;
         lines.add(0, "Classic PT test, " + g.name + ", " + new Date());
+        lines.add(1, "     " + muteNote);
         if (why != null) check(false, why);
         check(GLContext.getCapabilities().OpenGL43, "OpenGL 4.3 compute shaders (" + GL11.glGetString(GL11.GL_RENDERER) + ", " + GL11.glGetString(GL11.GL_VERSION) + ")");
         check(t.ok, "the tracer started: " + t.status);
@@ -276,6 +447,8 @@ final class Test {
         } catch (Exception e) {
             Hooks.log("could not write the report: " + e);
         }
+        try { for (int i = 0; i < shots.length; i++) if (shots[i] != null && shots[i].isFile()) java.nio.file.Files.copy(shots[i].toPath(), new File(dir, "photo-" + (i + 1) + ".png").toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING); } catch (Exception ignored) {}
+        mute(false);
         Hooks.log("test done: " + passed + " passed, " + failed + " failed, report in " + dir.getAbsolutePath());
         done = true;
         System.exit(failed == 0 ? 0 : 1);

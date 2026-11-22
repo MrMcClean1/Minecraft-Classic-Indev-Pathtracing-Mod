@@ -4,13 +4,15 @@ import org.lwjgl.input.Keyboard;
 
 /**
  * Called from the game's own bytecode (see tweak.Hook). The path tracer is off when the game starts. Keys, the same
- * as the Alpha and Beta path tracers': F7 on/off, F4 preset, F9 denoiser, F10 look, F6 photo mode, Home the view.
+ * as the Alpha and Beta path tracers': F7 on/off, F4 preset, F9 denoiser, F10 look, F6 photo mode, Home the view,
+ * Page Down a time-lapse keyframe and Page Up records (photo mode and the time-lapse when switched on in the file).
  * Each change shows in the game's chat (and the log) and is saved to classicpt.properties.
  */
 public final class Hooks {
     private Hooks() {}
 
-    static final int[] KEYS = {Keyboard.KEY_F7, Keyboard.KEY_F4, Keyboard.KEY_F9, Keyboard.KEY_F10, Keyboard.KEY_F6, Keyboard.KEY_HOME};
+    static final int[] KEYS = {Keyboard.KEY_F7, Keyboard.KEY_F4, Keyboard.KEY_F9, Keyboard.KEY_F10, Keyboard.KEY_F6, Keyboard.KEY_HOME,
+            Keyboard.KEY_NEXT, Keyboard.KEY_PRIOR};
     static Game game;
     static Tracer tracer;
     static boolean enabled;
@@ -98,6 +100,7 @@ public final class Hooks {
             if (!setup(owner)) return;
             if (!Test.running() && !Museum.running() && Keyboard.isCreated() && game.noScreen()) keys();
             Test.beforeTrace(partial);
+            TimeLapse.beforeTrace(game, tracer); // a recording time-lapse holds the camera on its path
             Museum.beforeTrace(game);
             if (enabled) tracer.render(partial);
             Test.afterTrace(partial);
@@ -124,7 +127,16 @@ public final class Hooks {
             case 1: s.applyPreset((s.preset + 1) % 3); say("Path tracer preset: " + Settings.PRESETS[s.preset]); break;
             case 2: s.denoiser = (s.denoiser + 1) % 3; say("Path tracer denoiser: " + Settings.DENOISERS[s.denoiser]); break;
             case 3: s.look = (s.look + 1) % 3; say("Path tracer look: " + Settings.LOOKS[s.look]); break;
-            case 4: if (enabled) tracer.startPhoto(); else say("Photo mode needs the path tracer on (F7)"); return;
+            case 4:
+                if (!s.photoEnabled) say("Photo mode is off: photo.enabled=true in classicpt.properties");
+                else if (enabled) tracer.startPhoto(); else say("Photo mode needs the path tracer on (F7)");
+                return;
+            case 6: say(s.timelapseEnabled ? TimeLapse.addKey(game) : "Time-lapse is off: timelapse.enabled=true in classicpt.properties"); return;
+            case 7:
+                if (!s.timelapseEnabled) say("Time-lapse is off: timelapse.enabled=true in classicpt.properties");
+                else if (TimeLapse.running()) TimeLapse.finish(game, false, s);
+                else say(TimeLapse.start(game, tracer));
+                return;
             case 5: s.view = (s.view + 1) % Settings.VIEWS.length; say("Path tracer view: " + Settings.VIEWS[s.view]); break;
         }
         s.save();

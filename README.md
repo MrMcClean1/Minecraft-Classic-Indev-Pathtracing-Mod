@@ -12,6 +12,17 @@ sunlight and its shadows, light from torches, fire and lava, two bounces of ligh
 leaves and glass, plants, slabs, torches, water that reflects and refracts, the water and ground around the map.
 Frames add up while the view stays still.
 
+## Photo mode and time-lapse (opt-in)
+
+As in the Alpha, Beta and Tekkit tracers, off by default and switched on in `.minecraft\classicpt.properties`:
+`photo.enabled=true` makes **F6** add up a still of `photo.samples` samples per pixel (default 256) into
+`screenshots/`, with depth of field when `photo.aperture` is above 0 (lens radius in blocks, focused on what the
+crosshair points at). `timelapse.enabled=true`: **Page Down** sets a keyframe where you stand and look, **Page Up**
+records `timelapse.frames` pictures along a smooth path through them into `screenshots/timelapse-<date>/`, and makes
+`timelapse.mp4` with ffmpeg if it is on the PATH. The settings file uses the same option names as the other tracers
+(`denoise`, `denoiser`, `look.realism`, `heldLights`, `sharpen`, `traceDistance`, `fx.wavingPlants`, `fx.waterWaves`...);
+older files still load.
+
 ## NVIDIA RTX (opt-in)
 
 On an RTX card, as in the Alpha, Beta and Tekkit tracers, all off by default and set in `.minecraft\classicpt.properties`

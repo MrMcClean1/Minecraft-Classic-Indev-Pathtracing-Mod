@@ -37,8 +37,8 @@ final class Tracer {
     final Settings settings = new Settings();
     boolean ok, failed;
     String status = "not started";
-    private int prog, progTemporal, progAtrous, progCompose, progInputs, progRrPrep, progTonemap, worldTex, atlasTex, cloudsTex, infoBuf, lightBuf;
-    private int lightTex, albedoTex, outTex;
+    private int prog, progTemporal, progAtrous, progCompose, progInputs, progRrPrep, progTonemap, progRcas, worldTex, atlasTex, cloudsTex, infoBuf, lightBuf;
+    private int lightTex, albedoTex, outTex, sharpTex;
     // NVIDIA: DLSS's depth and motion, Ray Reconstruction's inputs (render size) and its tone-mapped result (window size)
     private int depthTex, motionTex, rrHdr, rrDiffuse, rrNormal, rrSpecular, rrOut, rrOutW, rrOutH;
     private static final float NEAR = 0.05f;
@@ -59,6 +59,11 @@ final class Tracer {
     double lastMs;
     boolean photo;                      // photo mode: add up until clean, then save
     String photoSaved;
+    /** Where the next photo goes (a time-lapse frame) and what runs once it is saved; null: screenshots/<date>. */
+    private File photoTarget;
+    private Runnable photoThen;
+    /** Photo mode's focus distance (blocks): what the crosshair points at when it starts. */
+    float focus = 16f;
     int[][] faces;
 
     Tracer(Game g) {
@@ -81,6 +86,7 @@ final class Tracer {
             progInputs = program("dlss_inputs");
             progRrPrep = program("rr_prep");
             progTonemap = program("tonemap");
+            progRcas = program("rcas");
             atlasTex = loadTexture("/terrain.png", false);
             cloudsTex = loadTexture("/clouds.png", true);
             infoBuf = blockTable();
@@ -297,13 +303,14 @@ final class Tracer {
     private void targets(int w, int h) {
         if (w == outW && h == outH && outTex != 0) return;
         if (outTex != 0) {
-            GL11.glDeleteTextures(lightTex); GL11.glDeleteTextures(albedoTex); GL11.glDeleteTextures(outTex);
+            GL11.glDeleteTextures(lightTex); GL11.glDeleteTextures(albedoTex); GL11.glDeleteTextures(outTex); GL11.glDeleteTextures(sharpTex);
             for (int t : new int[]{depthTex, motionTex, rrHdr, rrDiffuse, rrNormal, rrSpecular}) GL11.glDeleteTextures(t);
             for (int i = 0; i < 2; i++) { GL11.glDeleteTextures(geomTex[i]); GL11.glDeleteTextures(accumTex[i]); GL11.glDeleteTextures(tmpTex[i]); }
         }
         lightTex = texture(w, h, GL30.GL_RGBA16F, false);
         albedoTex = texture(w, h, GL11.GL_RGBA8, false);
         outTex = texture(w, h, GL11.GL_RGBA8, true);
+        sharpTex = texture(w, h, GL11.GL_RGBA8, true);
         depthTex = texture(w, h, GL30.GL_R32F, false);
         motionTex = texture(w, h, GL30.GL_RG16F, false);
         rrHdr = texture(w, h, GL30.GL_RGBA16F, false);
@@ -359,7 +366,7 @@ final class Tracer {
         float[] camNow = {v[0], v[1], v[2], fx, fy, fz, rx, 0, rz, ux, uy, uz};
         boolean nvReset = !historyValid || prevCam == null
                 || Math.abs(camNow[0] - prevCam[0]) + Math.abs(camNow[1] - prevCam[1]) + Math.abs(camNow[2] - prevCam[2]) > 8f;
-        if (photo && prevCam != null && !Arrays.equals(prevCam, camNow)) { photo = false; Hooks.say("Photo cancelled: the view moved"); }
+        if (photo && prevCam != null && !Arrays.equals(prevCam, camNow)) { photo = false; photoTarget = null; photoThen = null; Hooks.say("Photo cancelled: the view moved"); }
         float tan = (float) Math.tan(Math.toRadians(70) / 2), aspect = tw / (float) th;
         int gx = (tw + 7) / 8, gy = (th + 7) / 8;
         int prev = cur;
@@ -394,6 +401,8 @@ final class Tracer {
         GL20.glUniform4f(loc(prog, "uHeld"), v[0] + rx * 0.4f, v[1] - 0.3f, v[2] + rz * 0.4f, held);
         GL20.glUniform2f(loc(prog, "uJitter"), jitX, jitY);
         GL20.glUniform1i(loc(prog, "uPointSample"), dlssFrame ? 1 : 0);
+        GL20.glUniform2f(loc(prog, "uDof"), photo ? st.photoAperture : 0f, focus);
+        GL20.glUniform1f(loc(prog, "uMaxDist"), st.traceDistance > 0 ? st.traceDistance : 600f);
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
         GL11.glBindTexture(GL12.GL_TEXTURE_3D, worldTex);
         GL13.glActiveTexture(GL13.GL_TEXTURE1);
@@ -472,12 +481,25 @@ final class Tracer {
         GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT | GL42.GL_TEXTURE_UPDATE_BARRIER_BIT);
 
         int shown = outTex;
+        if (st.sharpen > 0.001f && !photo && !dlssFrame) { // sharpening (AMD RCAS, as the other tracers); photos as traced
+            GL20.glUseProgram(progRcas);
+            GL20.glUniform2i(loc(progRcas, "uSize"), tw, th);
+            GL20.glUniform1f(loc(progRcas, "uSharpness"), (float) Math.pow(2.0, -2.0 * (1.0 - Math.min(1f, st.sharpen))));
+            GL13.glActiveTexture(GL13.GL_TEXTURE0);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, outTex);
+            image(0, sharpTex, GL15.GL_WRITE_ONLY, GL11.GL_RGBA8);
+            GL43.glDispatchCompute(gx, gy, 1);
+            GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
+            shown = sharpTex;
+        }
         if (dlssFrame) {
             int t = VkBridge.dlss(outTex, depthTex, motionTex, tw, th, w, h, dlssMode(), nvCamera(camNow, tan), nvReset);
             if (t != 0) { shown = t; dlssActive = true; dlssFrames++; }
         }
         finishFrame(shown, w, h, camNow, t0);
-        if (photo && history >= 512) savePhoto(tw, th);
+        // photo.samples per pixel: each photo frame traces at least 4 (uSamples above)
+        if (photo && history * Math.max(4, st.samples) >= st.photoSamples) savePhoto(tw, th);
         return true;
     }
 
@@ -598,11 +620,40 @@ final class Tracer {
     private static void image(int unit, int tex, int access, int format) { GL42.glBindImageTexture(unit, tex, 0, false, 0, access, format); }
     private static void barrier() { GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT); }
 
-    /** Photo mode (F6): hold still, the picture adds up for 512 frames, then it goes to screenshots/ as a PNG. */
+    /**
+     * Photo mode (F6, with photo.enabled): hold still, the picture adds up photo.samples samples per pixel, then it goes
+     * to screenshots/ as a PNG. With photo.aperture above 0, depth of field focused on what the crosshair points at.
+     */
     void startPhoto() {
-        photo = true;
-        resetHistory();
+        startPhoto(null, null);
         Hooks.say("Photo mode: hold still...");
+    }
+
+    /** A photo of the view now, into this file (null: screenshots/<date>), then the callback (the time-lapse's next frame). */
+    void startPhoto(File target, Runnable then) {
+        photo = true;
+        photoTarget = target;
+        photoThen = then;
+        photoSaved = null;
+        prevCam = null; // a new view: not "the view moved"
+        float[] v = g.view(1f);
+        if (v != null) focus = focusFrom(v);
+        resetHistory();
+    }
+
+    /** Distance to the first block (water counts) along the view from the eye, up to 600 blocks. */
+    private float focusFrom(float[] v) {
+        byte[] b = g.blocks();
+        int nx = g.sizeX(), ny = g.sizeY(), nz = g.sizeZ();
+        if (b == null || nx <= 0) return 16f;
+        double yaw = Math.toRadians(v[3]), pitch = Math.toRadians(v[4]);
+        double dx = Math.sin(yaw) * Math.cos(pitch), dy = -Math.sin(pitch), dz = -Math.cos(yaw) * Math.cos(pitch);
+        for (double t = 0.05; t < 600; t += 0.05) {
+            int x = (int) Math.floor(v[0] + dx * t), y = (int) Math.floor(v[1] + dy * t), z = (int) Math.floor(v[2] + dz * t);
+            if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) { if (y < 0) return (float) t; continue; }
+            if (b[(y * nz + z) * nx + x] != 0) return (float) Math.max(0.3, t);
+        }
+        return 600f;
     }
 
     private void savePhoto(int w, int h) {
@@ -618,15 +669,23 @@ final class Tracer {
                     int i = ((h - 1 - y) * w + x) * 4;
                     img.setRGB(x, y, (b.get(i) & 255) << 16 | (b.get(i + 1) & 255) << 8 | (b.get(i + 2) & 255));
                 }
-            File dir = new File("screenshots");
-            dir.mkdirs();
-            File f = new File(dir, "classicpt_" + new SimpleDateFormat("yyyy-MM-dd_HH.mm.ss").format(new Date()) + ".png");
+            File f = photoTarget;
+            if (f == null) {
+                File dir = new File("screenshots");
+                String stamp = new SimpleDateFormat("yyyy-MM-dd_HH.mm.ss").format(new Date());
+                f = new File(dir, "classicpt_" + stamp + ".png");
+                for (int i = 2; f.exists(); i++) f = new File(dir, "classicpt_" + stamp + "_" + i + ".png");
+            }
+            f.getParentFile().mkdirs();
             ImageIO.write(img, "png", f);
             photoSaved = f.getPath();
-            Hooks.say("Photo saved: " + f.getName());
+            if (photoTarget == null) Hooks.say("Photo saved: " + f.getName());
         } catch (Exception e) {
             Hooks.say("Photo failed: " + e.getMessage());
         }
+        Runnable then = photoThen;
+        photoTarget = null; photoThen = null;
+        if (then != null) then.run();
     }
 
     /** The traced picture over the whole window (scaled up if the render scale is under 1), the game's GL state kept. */
