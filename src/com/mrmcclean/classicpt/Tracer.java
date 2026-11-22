@@ -42,6 +42,9 @@ final class Tracer {
     // NVIDIA: DLSS's depth and motion, Ray Reconstruction's inputs (render size) and its tone-mapped result (window size)
     private int depthTex, motionTex, rrHdr, rrDiffuse, rrNormal, rrSpecular, rrOut, rrOutW, rrOutH;
     private static final float NEAR = 0.05f;
+    private int progDraw;
+    /** Set by Hooks for this frame: the picture goes under the game's mobs and hand, with the traced depth. */
+    boolean underGame;
     private int jitterFrame;
     private float jitX, jitY;
     boolean dlssActive, rrActive, rrFailed; // what made the last frame's picture; RR off after it refused (until F7)
@@ -91,6 +94,7 @@ final class Tracer {
             progRrPrep = program("rr_prep");
             progTonemap = program("tonemap");
             progRcas = program("rcas");
+            progDraw = drawProgram();
             atlasTex = loadTexture("/terrain.png", false);
             cloudsTex = loadTexture("/clouds.png", true);
             infoBuf = blockTable();
@@ -115,6 +119,45 @@ final class Tracer {
         for (int n; (n = in.read(b)) > 0; ) o.write(b, 0, n);
         in.close();
         return new String(o.toByteArray(), "UTF-8");
+    }
+
+    /**
+     * The picture onto the screen. Drawn right after the game's terrain (Hooks.afterTerrain), it also writes the traced
+     * depth, so the game's own bots, mobs, particles, block cracks and outline, and the hand, still draw over it.
+     */
+    private static int drawProgram() throws Exception {
+        String vs = "#version 430 compatibility\n"
+                + "out vec2 vUv;\n"
+                + "void main() { vUv = gl_MultiTexCoord0.xy; gl_Position = ftransform(); }\n";
+        String fs = "#version 430 compatibility\n"
+                + "in vec2 vUv;\n"
+                + "uniform sampler2D uColor, uGeom;\n"
+                + "uniform int uDepth;\n"
+                + "uniform float uTan, uAspect, uA, uB;\n"
+                + "out vec4 frag;\n"
+                + "void main() {\n"
+                + "  frag = vec4(texture(uColor, vUv).rgb, 1.0);\n"
+                + "  float d = 1.0;\n"
+                + "  float t = uDepth == 1 ? texture(uGeom, vUv).w : -1.0;\n"
+                + "  if (t >= 0.0) {\n" // distance along the ray to distance along the view axis, then the game's depth
+                + "    vec2 n = vUv * 2.0 - 1.0;\n"
+                + "    float z = max(t / length(vec3(1.0, n.x * uTan * uAspect, n.y * uTan)), 0.01);\n"
+                + "    z = z * 1.004 + 0.003;\n" // a hair behind: the game's cracks and outline lie right on the face, with no offset
+                + "    d = clamp((-uA + uB / z) * 0.5 + 0.5, 0.0, 1.0);\n"
+                + "  }\n"
+                + "  gl_FragDepth = d;\n"
+                + "}\n";
+        int p = GL20.glCreateProgram();
+        for (int i = 0; i < 2; i++) {
+            int sh = GL20.glCreateShader(i == 0 ? GL20.GL_VERTEX_SHADER : GL20.GL_FRAGMENT_SHADER);
+            GL20.glShaderSource(sh, i == 0 ? vs : fs);
+            GL20.glCompileShader(sh);
+            if (GL20.glGetShaderi(sh, GL20.GL_COMPILE_STATUS) == 0) throw new IllegalStateException("draw: " + GL20.glGetShaderInfoLog(sh, 16384));
+            GL20.glAttachShader(p, sh);
+        }
+        GL20.glLinkProgram(p);
+        if (GL20.glGetProgrami(p, GL20.GL_LINK_STATUS) == 0) throw new IllegalStateException("draw link: " + GL20.glGetProgramInfoLog(p, 16384));
+        return p;
     }
 
     private static int program(String name) throws Exception {
@@ -704,6 +747,8 @@ final class Tracer {
 
     /** The traced picture over the whole window (scaled up if the render scale is under 1), the game's GL state kept. */
     private void draw(int tex, int w, int h) {
+        java.nio.FloatBuffer pm = org.lwjgl.BufferUtils.createFloatBuffer(16);
+        GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, pm); // the game's camera, for the depth the picture writes
         GL11.glPushAttrib(GL11.GL_ALL_ATTRIB_BITS);
         GL11.glMatrixMode(GL11.GL_PROJECTION);
         GL11.glPushMatrix();
@@ -713,7 +758,8 @@ final class Tracer {
         GL11.glPushMatrix();
         GL11.glLoadIdentity();
         GL11.glViewport(0, 0, w, h);
-        GL11.glDisable(GL11.GL_DEPTH_TEST);
+        if (underGame) { GL11.glEnable(GL11.GL_DEPTH_TEST); GL11.glDepthFunc(GL11.GL_ALWAYS); GL11.glDepthMask(true); GL11.glColorMask(true, true, true, true); }
+        else GL11.glDisable(GL11.GL_DEPTH_TEST);
         GL11.glDisable(GL11.GL_LIGHTING);
         GL11.glDisable(GL11.GL_FOG);
         GL11.glDisable(GL11.GL_BLEND);
@@ -723,12 +769,29 @@ final class Tracer {
         GL11.glEnable(GL11.GL_TEXTURE_2D);
         GL11.glColor4f(1, 1, 1, 1);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, tex);
+        if (progDraw != 0) {
+            GL13.glActiveTexture(GL13.GL_TEXTURE1);
+            GL11.glBindTexture(GL11.GL_TEXTURE_2D, geomTex[cur]);
+            GL13.glActiveTexture(GL13.GL_TEXTURE0);
+            GL20.glUseProgram(progDraw);
+            GL20.glUniform1i(loc(progDraw, "uColor"), 0);
+            GL20.glUniform1i(loc(progDraw, "uGeom"), 1);
+            GL20.glUniform1i(loc(progDraw, "uDepth"), underGame ? 1 : 0);
+            GL20.glUniform1f(loc(progDraw, "uTan"), (float) Math.tan(Math.toRadians(70) / 2));
+            GL20.glUniform1f(loc(progDraw, "uAspect"), w / (float) h);
+            GL20.glUniform1f(loc(progDraw, "uA"), pm.get(10));
+            GL20.glUniform1f(loc(progDraw, "uB"), pm.get(14));
+        }
         GL11.glBegin(GL11.GL_QUADS);
         GL11.glTexCoord2f(0, 0); GL11.glVertex2f(0, 0);
         GL11.glTexCoord2f(1, 0); GL11.glVertex2f(1, 0);
         GL11.glTexCoord2f(1, 1); GL11.glVertex2f(1, 1);
         GL11.glTexCoord2f(0, 1); GL11.glVertex2f(0, 1);
         GL11.glEnd();
+        GL20.glUseProgram(0);
+        GL13.glActiveTexture(GL13.GL_TEXTURE1);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
         GL11.glPopMatrix();
         GL11.glMatrixMode(GL11.GL_PROJECTION);

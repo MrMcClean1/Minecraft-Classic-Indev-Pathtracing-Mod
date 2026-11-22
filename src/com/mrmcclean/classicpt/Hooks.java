@@ -1,6 +1,7 @@
 package com.mrmcclean.classicpt;
 
 import org.lwjgl.input.Keyboard;
+import org.lwjgl.opengl.GL11;
 
 /**
  * Called from the game's own bytecode (see tweak.Hook). The path tracer is off when the game starts. Keys, the same
@@ -95,22 +96,64 @@ public final class Hooks {
         try (java.io.PrintStream p = new java.io.PrintStream(new java.io.FileOutputStream(new java.io.File("classicbots-test", "error.txt"), true))) { t.printStackTrace(p); } catch (Exception ignored) {}
     }
 
-    /** After the world is drawn, before the HUD. */
-    public static void beforeHud(float partial, Object owner) {
+    /** True from afterTerrain to beforeHud: this frame's picture is already down, under the game's mobs and hand. */
+    private static boolean early, drawnEarly;
+
+    /**
+     * Right after the game's solid terrain, before its mobs, particles, block cracks, water, clouds and hand: the traced
+     * picture goes down here with its depth, so the game draws the bots, mobs, cracks, outline and hand over it.
+     */
+    public static void afterTerrain(float partial, Object owner) {
+        early = true;
+        drawnEarly = false;
         try {
             if (!setup(owner)) return;
-            if (!Test.running() && !Museum.running() && Keyboard.isCreated() && game.noScreen()) keys();
-            Test.beforeTrace(partial);
-            TimeLapse.beforeTrace(game, tracer); // a recording time-lapse holds the camera on its path
-            Museum.beforeTrace(game);
-            if (enabled) tracer.render(partial);
+            trace(partial, true);
+        } catch (Throwable t) {
+            stopped(t);
+        }
+    }
+
+    /** Around the game's own clouds, sky and water: drawn into nothing while the traced picture stands in for them. */
+    public static void hideStart() {
+        if (drawnEarly) { GL11.glColorMask(false, false, false, false); GL11.glDepthMask(false); }
+    }
+
+    public static void hideEnd() {
+        if (drawnEarly) { GL11.glColorMask(true, true, true, true); GL11.glDepthMask(true); }
+    }
+
+    /** After the world is drawn, before the HUD. */
+    public static void beforeHud(float partial, Object owner) {
+        boolean wasEarly = early;
+        early = drawnEarly = false;
+        try {
+            if (!setup(owner)) return;
+            if (!wasEarly) trace(partial, false); // no terrain hook this frame: the picture over everything, as before
             Test.afterTrace(partial);
             Museum.afterTrace(game);
         } catch (Throwable t) {
-            log("path tracer stopped: " + t);
-            t.printStackTrace();
-            enabled = false;
+            stopped(t);
         }
+    }
+
+    private static void trace(float partial, boolean under) {
+        if (!Test.running() && !Museum.running() && Keyboard.isCreated() && game.noScreen()) keys();
+        Test.beforeTrace(partial);
+        TimeLapse.beforeTrace(game, tracer); // a recording time-lapse holds the camera on its path
+        Museum.beforeTrace(game);
+        if (!enabled) return;
+        tracer.underGame = under;
+        boolean drawn = tracer.render(partial);
+        tracer.underGame = false;
+        if (under) drawnEarly = drawn;
+    }
+
+    private static void stopped(Throwable t) {
+        log("path tracer stopped: " + t);
+        t.printStackTrace();
+        enabled = false;
+        drawnEarly = false;
     }
 
     private static void keys() {

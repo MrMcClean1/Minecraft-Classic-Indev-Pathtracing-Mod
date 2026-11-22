@@ -109,10 +109,72 @@ public class Hook implements Injection, Opcodes {
         System.out.println("[ClassicPT] arrow key " + r);
     }
 
+    /**
+     * The traced picture under the game's mobs, hand and block cracks: Hooks.afterTerrain(partial, this) right after the
+     * solid terrain pass (the renderer's (player, 0) call, its int result popped), and Hooks.hideStart/hideEnd around
+     * what the picture already shows (clouds, the sky plane, water, the rock and water around the map), so they draw
+     * into nothing while it is on. Only up to the depth clear before the hand.
+     *   Classic 0.30: l.run(), terrain b/g.a(Player, I)I, partial in local 7 (the HUD's); clouds and sky inline from
+     *     "/clouds.png" to the second tessellator draw after it; rock and edge water glCallList; water glCallLists.
+     *   Indev: a/e.e(F)V, terrain a/b.a(player, I)I, partial in local 1; edge water a/b.g()V, edge ground a/b.f()V, water a/b.d()V.
+     */
+    private static void hookWorld(ClassNodeSource source) {
+        String r = "no world renderer";
+        ClassNode classic = source.getClass("com/mojang/minecraft/l"), indev = source.getClass("net/minecraft/client/a/e");
+        if (classic != null) r = hookWorld(source, classic, "run", "()V", "com/mojang/minecraft/b/g", "(Lcom/mojang/minecraft/player/Player;I)I", 7, true);
+        else if (indev != null) r = hookWorld(source, indev, "e", "(F)V", "net/minecraft/client/a/b", "(Lnet/minecraft/a/c/e/a;I)I", 1, false);
+        System.setProperty("classicpt.world", r);
+        System.out.println("[ClassicPT] world hook: " + r);
+    }
+
+    private static String hookWorld(ClassNodeSource source, ClassNode cn, String name, String desc, String renderer, String pass, int partial, boolean classic) {
+        for (MethodNode m : cn.methods) {
+            if (!m.name.equals(name) || !m.desc.equals(desc)) continue;
+            MethodInsnNode terrain = null;
+            java.util.List<AbstractInsnNode[]> hide = new java.util.ArrayList<>(); // {first, last}: hidden from before first to after last
+            for (AbstractInsnNode n = m.instructions.getFirst(); n != null; n = n.getNext()) {
+                if (n instanceof MethodInsnNode) {
+                    MethodInsnNode mi = (MethodInsnNode) n;
+                    if (terrain == null && mi.owner.equals(renderer) && mi.desc.equals(pass) && prev(mi).getOpcode() == ICONST_0 && next(mi).getOpcode() == POP) { terrain = mi; continue; }
+                    if (terrain == null) continue;
+                    if (mi.owner.equals("org/lwjgl/opengl/GL11") && mi.name.equals("glClear")) break; // the hand comes after: leave it
+                    if (!classic && mi.owner.equals(renderer) && mi.desc.equals("()V") && (mi.name.equals("g") || mi.name.equals("d") || mi.name.equals("f"))) hide.add(new AbstractInsnNode[]{mi, mi});
+                    if (classic && mi.owner.equals("org/lwjgl/opengl/GL11") && (mi.name.equals("glCallList") || mi.name.equals("glCallLists"))) hide.add(new AbstractInsnNode[]{mi, mi});
+                } else if (classic && terrain != null && n instanceof LdcInsnNode && "/clouds.png".equals(((LdcInsnNode) n).cst)) {
+                    int draws = 0;
+                    for (AbstractInsnNode e = n; e != null; e = e.getNext())
+                        if (e instanceof MethodInsnNode && ((MethodInsnNode) e).owner.equals("com/mojang/minecraft/b/c") && ((MethodInsnNode) e).name.equals("a") && ((MethodInsnNode) e).desc.equals("()V") && ++draws == 2) {
+                            hide.add(new AbstractInsnNode[]{n, e});
+                            n = e;
+                            break;
+                        }
+                }
+            }
+            if (terrain == null) return "no terrain pass in " + name;
+            InsnList l = new InsnList();
+            l.add(new VarInsnNode(FLOAD, partial));
+            l.add(new VarInsnNode(ALOAD, 0));
+            l.add(new MethodInsnNode(INVOKESTATIC, HOOKS, "afterTerrain", "(FLjava/lang/Object;)V", false));
+            m.instructions.insert(next(terrain), l);
+            for (AbstractInsnNode[] h : hide) {
+                m.instructions.insertBefore(h[0], new MethodInsnNode(INVOKESTATIC, HOOKS, "hideStart", "()V", false));
+                m.instructions.insert(h[1], new MethodInsnNode(INVOKESTATIC, HOOKS, "hideEnd", "()V", false));
+            }
+            m.maxStack += 2;
+            source.overrideClass(cn);
+            return "hooked " + cn.name + "." + name + ", " + hide.size() + " hidden draws";
+        }
+        return "no " + name + desc + " in " + cn.name;
+    }
+
+    private static AbstractInsnNode prev(AbstractInsnNode n) { do n = n.getPrevious(); while (n != null && n.getOpcode() < 0); return n; }
+    private static AbstractInsnNode next(AbstractInsnNode n) { do n = n.getNext(); while (n != null && n.getOpcode() < 0); return n; }
+
     @Override
     public boolean apply(ClassNodeSource source, LaunchConfig config) {
         hookLoader(source);
         hookArrowKey(source);
+        hookWorld(source);
         for (String[] t : TARGETS) {
             ClassNode cn = source.getClass(t[0]);
             if (cn == null) continue;
