@@ -30,6 +30,7 @@ public final class Entry {
             else if (slash && !slashWas) mc.openScreen(new ChatScreen("/"));
         }
         tWas = t; slashWas = slash;
+        if (mc.world != null && mc.screen == null && Keyboard.isCreated() && Keyboard.isKeyDown(Keyboard.KEY_TAB)) BotList.draw(mc); // hold Tab: the bots
     }
 
     public static Object entity(Object level, String id) { return null; }

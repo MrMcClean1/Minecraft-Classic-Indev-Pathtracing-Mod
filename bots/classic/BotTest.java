@@ -70,17 +70,22 @@ public final class BotTest {
         if (mc.screen != null && !(mc.screen instanceof ChatScreen) && mc.world != null) mc.openScreen(null); // pause menu
         if (mc.options != null && step == 0) { music = mc.options.music; sound = mc.options.sound; mc.options.music = false; mc.options.sound = false; }
         if (mc.world == null) {
+            if (lastState != null) { check(false, "the level went away during step " + step + "; just before: " + lastState + ", now screen " + (mc.screen == null ? "none" : mc.screen.getClass().getName())); finish(mc); return; }
             if (System.currentTimeMillis() - t0 > 120000) { check(false, "a level to test in"); finish(mc); }
             return;
         }
         PlayerEntity p = mc.player;
         if (p == null) return;
+        lastState = String.format("player %.1f %.1f %.1f health %d removed %s, screen %s", p.x, p.y, p.z, p.health, p.removed, mc.screen == null ? "none" : mc.screen.getClass().getName());
         p.health = 20; // the player takes no harm while the test runs
         try { run(mc, p); } catch (Throwable t) { check(false, "step " + step + " threw " + trace(t)); finish(mc); }
     }
 
     private static net.minecraft.entity.mob.MobEntity zombie;
     private static Blueprint plan;
+    private static ChatScreen chat;
+    /** The player and screen last frame (reported if the level goes away). */
+    private static String lastState;
     private static World world;
     private static int px, py, pz, pf;
     /** Classic has no chests: a base is its home only. */
@@ -100,6 +105,62 @@ public final class BotTest {
     private static void waitFor(boolean ok, int seconds, String what) {
         if (ok) { check(true, what + " in " + inStep() / 1000 + " s"); next(); }
         else if (inStep() > seconds * 1000L) { check(false, what + " after " + seconds + " s; bot: " + status(world)); next(); }
+    }
+
+    /** The frame as drawn (the back buffer, before the game shows it), upside up. */
+    private static java.awt.image.BufferedImage picture(Minecraft mc, File f) {
+        try {
+            int w = mc.displayWidth, h = mc.displayHeight;
+            java.nio.ByteBuffer buf = org.lwjgl.BufferUtils.createByteBuffer(w * h * 3);
+            org.lwjgl.opengl.GL11.glPixelStorei(org.lwjgl.opengl.GL11.GL_PACK_ALIGNMENT, 1);
+            org.lwjgl.opengl.GL11.glReadPixels(0, 0, w, h, org.lwjgl.opengl.GL11.GL_RGB, org.lwjgl.opengl.GL11.GL_UNSIGNED_BYTE, buf);
+            java.awt.image.BufferedImage img = new java.awt.image.BufferedImage(w, h, java.awt.image.BufferedImage.TYPE_INT_RGB);
+            for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
+                int i = ((h - 1 - y) * w + x) * 3;
+                img.setRGB(x, y, (buf.get(i) & 255) << 16 | (buf.get(i + 1) & 255) << 8 | buf.get(i + 2) & 255);
+            }
+            javax.imageio.ImageIO.write(img, "png", f);
+            return img;
+        } catch (Throwable t) { note("no picture: " + t); return null; }
+    }
+
+    /** About 5 blocks from the bot on ground at its own level (no ledge between them), else 5 blocks east. */
+    private static double[] level(World w, BotEntity b) {
+        int bx = (int) Math.floor(b.x), by = (int) Math.floor(b.y), bz = (int) Math.floor(b.z);
+        for (int k = 0; k < 8; k++) {
+            int x = bx + (int) Math.round(Math.cos(k * Math.PI / 4) * 5), z = bz + (int) Math.round(Math.sin(k * Math.PI / 4) * 5);
+            if (w.getHeight(x, z) == by && w.getBlock(x, by - 1, z) != 8 && w.getBlock(x, by - 1, z) != 9) return new double[]{x + 0.5, by, z + 0.5};
+        }
+        return new double[]{b.x + 5, b.y, b.z};
+    }
+
+    private static java.awt.image.BufferedImage withBot;
+    private static double[] botAt;
+
+    private static final int[][] SIDES = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+    private static int camDir;
+
+    /** A side to look at the bot from, 3 blocks off and 2.4 up, with no block between the eye and its middle. */
+    private static int clearSide(World w, BotEntity b) {
+        for (int d = 0; d < 4; d++) {
+            net.minecraft.util.math.Vec3d eye = new net.minecraft.util.math.Vec3d((float) (b.x + SIDES[d][0] * 3), (float) (b.y + 2.4), (float) (b.z + SIDES[d][1] * 3));
+            net.minecraft.util.math.Vec3d mid = new net.minecraft.util.math.Vec3d((float) b.x, (float) (b.y + 0.9), (float) b.z);
+            int ex = (int) Math.floor(b.x + SIDES[d][0] * 3), ey = (int) Math.floor(b.y + 2.4), ez = (int) Math.floor(b.z + SIDES[d][1] * 3);
+            if (w.getBlock(ex, ey, ez) != 0 || w.getBlock(ex, ey - 1, ez) != 0) continue; // the eye in the open (a ray from inside a block finds nothing)
+            if (w.rayTrace(eye, mid) == null) return d;
+        }
+        return 0;
+    }
+
+    /** The player 3 blocks from the bot (on the clear side) and a little above, looking at its middle. */
+    private static void camera(PlayerEntity p, BotEntity b) { camera(p, b.x, b.y, b.z); }
+
+    private static void camera(PlayerEntity p, double bx, double by, double bz) {
+        double ex = bx + SIDES[camDir][0] * 3, ey = by + 2.4, ez = bz + SIDES[camDir][1] * 3, dx = bx - ex, dz = bz - ez;
+        p.setPosition(ex, ey, ez);
+        p.velocityX = 0; p.velocityY = 0; p.velocityZ = 0;
+        p.yaw = p.prevYaw = (float) Math.toDegrees(Math.atan2(dx, -dz));
+        p.pitch = p.prevPitch = (float) Math.toDegrees(Math.atan2(ey - (by + 0.9), 3));
     }
 
     /** The exception, its cause, and where they came from (a few frames). */
@@ -122,10 +183,21 @@ public final class BotTest {
     private static void run(Minecraft mc, PlayerEntity p) throws Exception {
         World w = mc.world; world = w;
         switch (step) {
-            case 0:
+            case 0: {
                 BotConfig.enabled = true; // in memory: not saved
+                // Tab is the bot list: Classic's arrow is its own key in Controls ("Fire arrow", Q to start with)
+                String last = "";
+                int key = -1;
+                try {
+                    Object[] binds = mc.options.obf$s;
+                    Object k = binds[binds.length - 1];
+                    last = (String) k.getClass().getField("a").get(k);
+                    key = (Integer) Class.forName("com.mrmcclean.classicpt.Hooks", true, BotTest.class.getClassLoader()).getMethod("arrowKey").invoke(null);
+                } catch (Throwable t) { last = String.valueOf(t); }
+                check("Fire arrow".equals(last) && key == org.lwjgl.input.Keyboard.KEY_Q, "arrow key: Controls has \"" + last + "\", the game fires on " + org.lwjgl.input.Keyboard.getKeyName(key) + " (not Tab); the game patch: " + System.getProperty("classicpt.arrows", "never ran"));
                 next();
                 return;
+            }
             case 1: {
                 if (inStep() < 2000) return; // the level settles
                 Bots.chat(p, "/bot spawn Tess");
@@ -134,7 +206,7 @@ public final class BotTest {
                 check(b != null && sd < 4, "/bot spawn Tess: a bot by the player" + (b == null ? "" : String.format(" (%.1f blocks across)", sd)));
                 if (b != null) note(String.format("player %.1f %.1f %.1f, bot %.1f %.1f %.1f", p.x, p.y, p.z, b.x, b.y, b.z));
                 if (b == null) { finish(mc); return; }
-                next();
+                step = 40; stepStart = System.currentTimeMillis(); // a picture of it first
                 return;
             }
             case 2: { // order it to follow, then walk off
@@ -160,6 +232,65 @@ public final class BotTest {
                 if (inStep() > 45000) { check(false, String.format("follows: still %.1f blocks away after 45 s (mode %s)", d, b == null ? "-" : String.valueOf(b.brain.mode))); next(); }
                 return;
             }
+            // ---- can it be seen: a picture with it (bot.png) and without it (no-bot.png); the difference is the bot
+            case 40: {
+                BotEntity b = bot(w);
+                b.brain.mode = Brain.Mode.STAY;
+                if (botAt == null) { botAt = new double[3]; double[] open = spotAway(w, p, 8); if (open != null) b.setPositionAndAngles(open[0], open[1] + 0.1, open[2], 0, 0); camDir = clearSide(w, b); } // once: out in the open, not under a roof, and a side to look from with nothing in between
+                camera(p, b);
+                if (inStep() > 1500) next();
+                return;
+            }
+            case 41: { // the frame with the bot, then the bot out of the way for a moment
+                BotEntity b = bot(w);
+                camera(p, b);
+                withBot = picture(mc, new File(dir, "bot.png"));
+                BotList.draw(mc); // what holding Tab shows, over the same frame
+                picture(mc, new File(dir, "bot-list.png"));
+                botAt = new double[]{b.x, b.y, b.z};
+                b.setPositionAndAngles(b.x, b.y + 60, b.z, 0, 0);
+                step = 43; stepStart = System.currentTimeMillis();
+                return;
+            }
+            case 43: { // the same view without it: what changed in the middle of the picture is the bot
+                BotEntity b = bot(w);
+                b.setPositionAndAngles(botAt[0], botAt[1] + 60, botAt[2], 0, 0);
+                b.velocityY = 0;
+                camera(p, botAt[0], botAt[1], botAt[2]);
+                if (inStep() < 400) return;
+                java.awt.image.BufferedImage without = picture(mc, new File(dir, "no-bot.png"));
+                b.setPositionAndAngles(botAt[0], botAt[1], botAt[2], 0, 0);
+                int changed = 0, sum = 0, n = 0;
+                if (withBot != null && without != null) {
+                    int w0 = withBot.getWidth(), h0 = withBot.getHeight();
+                    for (int y = h0 / 4; y < h0 * 3 / 4; y++) for (int x = w0 / 3; x < w0 * 2 / 3; x++) {
+                        n++;
+                        int a = withBot.getRGB(x, y), c = without.getRGB(x, y);
+                        int d = Math.abs((a >> 16 & 255) - (c >> 16 & 255)) + Math.abs((a >> 8 & 255) - (c >> 8 & 255)) + Math.abs((a & 255) - (c & 255));
+                        if (d > 40) { changed++; sum += ((a >> 16 & 255) + (a >> 8 & 255) + (a & 255)) / 3; }
+                    }
+                }
+                int pct = n == 0 ? 0 : changed * 100 / n, bright = changed == 0 ? 0 : sum / changed;
+                check(pct >= 3, "the bot is drawn: " + pct + "% of the middle of the picture is the bot (bot.png against no-bot.png), drawn at brightness " + bright + " of 255");
+                // the chat box, as a player uses it: T opens it, typed keys, then Enter
+                chat = new ChatScreen("");
+                mc.openScreen(chat);
+                for (char c : "Tess what do you have".toCharArray()) chat.keyPressed(c, 0);
+                bot(w).brain.lastReport = "";
+                step = 42; stepStart = System.currentTimeMillis();
+                return;
+            }
+            case 42: { // a frame later: the box is drawn; its picture, then Enter
+                if (inStep() < 300) return;
+                picture(mc, new File(dir, "chat-box.png"));
+                boolean open = mc.screen == chat;
+                chat.keyPressed((char) 13, org.lwjgl.input.Keyboard.KEY_RETURN);
+                String answer = bot(w).brain.lastReport;
+                check(open && mc.screen == null && !answer.isEmpty(), "chat box: typed \"Tess what do you have\", Tess answered \"" + answer + "\"" + (open ? "" : " (the box was not open)"));
+                bot(w).brain.mode = Brain.Mode.FOLLOW;
+                step = 2; stepStart = System.currentTimeMillis();
+                return;
+            }
             // ---- the jobs: gather, base, guard, build (each with a time limit; a fail goes on to the next)
             case 4: say(p, "Tess bring me 4 wood"); next(); return;
             case 5: waitFor(has(p, 17) >= 4, 240, "gather wood: the player got " + has(p, 17) + " logs"); return;
@@ -172,14 +303,18 @@ public final class BotTest {
                 BotEntity b = bot(w);
                 say(p, "Tess guard");
                 w.difficulty = 1;
-                net.minecraft.entity.mob.monster.ZombieEntity z = new net.minecraft.entity.mob.monster.ZombieEntity(w, (float) b.x + 5, (float) b.y, (float) b.z);
+                double[] at = level(w, b); net.minecraft.entity.mob.monster.ZombieEntity z = new net.minecraft.entity.mob.monster.ZombieEntity(w, (float) at[0], (float) at[1] + 1.62F, (float) at[2]); // a Classic mob's y is its eyes
                 w.addEntity(z);
                 zombie = z;
                 next();
                 return;
             }
-            case 11: waitFor(zombie.removed || zombie.health <= 0, 60, "guard: the zombie " + (zombie.removed || zombie.health <= 0 ? "is dead" : "still has " + zombie.health + " health") + ", bot health " + bot(w).health); return;
+            case 11:
+                waitFor(zombie.removed || zombie.health <= 0, 60, "guard: the zombie " + (zombie.removed || zombie.health <= 0 ? "is dead" : "still has " + zombie.health + " health") + ", bot health " + bot(w).health);
+                if (step == 12 && !zombie.removed) zombie.remove(); // a zombie it can't reach would keep it from every later job
+                return;
             case 12: {
+                w.difficulty = 0; // back to peaceful after the guard step (as Alpha's test): a creeper took the top off a finished hut
                 BotEntity b = bot(w);
                 b.brain.mode = Brain.Mode.STAY;
                 int sx = (int) Math.floor(p.x), sz = (int) Math.floor(p.z);
@@ -193,10 +328,19 @@ public final class BotTest {
                 return;
             }
             case 13: {
+                { Brain br = bot(w).brain; if (br.plan != null) { plan = br.plan; px = br.planX; py = br.planY; pz = br.planZ; pf = br.planF; } } // the plan it is building (an order heard twice starts it again)
                 int ok = 0, total = 0;
-                for (int[] pb : plan.blocks) { if (pb[3] == 0) continue; total++; int[] at = Blueprint.place(pb, px, py, pz, pf); if (w.getBlock(at[0], at[1], at[2]) == pb[3]) ok++; }
+                StringBuilder missing = new StringBuilder();
+                for (int[] pb : plan.blocks) {
+                    if (pb[3] == 0) continue;
+                    total++;
+                    int[] at = Blueprint.place(pb, px, py, pz, pf);
+                    int have = w.getBlock(at[0], at[1], at[2]);
+                    if (have == pb[3]) ok++;
+                    else if (missing.length() < 160) missing.append(" ").append(at[0]).append(",").append(at[1]).append(",").append(at[2]).append(" wants ").append(pb[3]).append(" has ").append(have).append(";");
+                }
                 boolean done = bot(w).brain.plan == null && ok * 10 >= total * 9;
-                if (done || inStep() > 150000) { check(done, "build a hut: " + ok + " of " + total + " blocks in place in " + inStep() / 1000 + " s" + (done ? "" : "; bot: " + status(w))); step = 30; stepStart = System.currentTimeMillis(); }
+                if (done || inStep() > 150000) { check(done, "build a hut: " + ok + " of " + total + " blocks in place in " + inStep() / 1000 + " s" + (done ? "" : "; missing:" + missing + " bot: " + status(w))); step = 30; stepStart = System.currentTimeMillis(); }
                 return;
             }
             case 30: { // save and load with the level

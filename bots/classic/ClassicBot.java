@@ -19,6 +19,10 @@ public class ClassicBot extends BotEntity {
     public ClassicBot(World w) {
         super(w);
         this.ai = new BotAI(this);
+        // Classic draws a mob's model 1.62 below its y (its mobs' y is their eyes, as a player's is); a bot's y is its
+        // feet, as in Alpha, so its model goes back up by as much (it was drawn inside the ground)
+        this.obf$renderOffset = 1.62F;
+        this.obf$modelName = "humanoid"; // Classic's Mob has none (its render draws nothing then); its humanoid mobs set it
     }
 
     private transient int calm;
@@ -37,7 +41,38 @@ public class ClassicBot extends BotEntity {
     public void hurt(Entity source, int amount) {
         if (hurting) { super.hurt(source, amount); return; }
         hurting = true;
-        try { takeDamage(source, amount); } finally { hurting = false; }
+        try { takeDamage(shooter(source), amount); } finally { hurting = false; }
+    }
+
+    /**
+     * An arrow's hit comes from the arrow; the bot answers whoever shot it (a skeleton), as it answers a zombie's blow.
+     * Alpha gives the shooter as the source already.
+     */
+    private static Entity shooter(Entity source) {
+        if (source == null || !source.getClass().getName().equals("com.mojang.minecraft.item.Arrow")) return source;
+        Object o = Compat.get(Compat.field(source.getClass(), "owner"), source);
+        return o instanceof Entity ? (Entity) o : source;
+    }
+
+    /**
+     * Classic's "head under water" looks at y, a Classic mob's eyes; a bot's y is its feet, so it ran out of air with
+     * wet feet and drowned in shallow water. Its eyes are 1.53 up.
+     */
+    @Override
+    public boolean isEyeInWater() {
+        int bx = Compat.floor(xf), by = Compat.floor(yf + 1.53F), bz = Compat.floor(zf);
+        if (!Compat.inside(world, bx, by, bz)) return false;
+        int id = world.getBlock(bx, by, bz);
+        return id == 8 || id == 9;
+    }
+
+    /**
+     * The light it is drawn in: Classic takes it at y + heightOffset / 2 - 0.5, a Classic mob's chest; for a bot (y at
+     * its feet) that was the block under it, so it was drawn dark. The middle of its body instead.
+     */
+    @Override
+    public float obf$getBrightness(float partial) {
+        return world.obf$getBrightness(Compat.floor(xf), Compat.floor(yf + 0.9F), Compat.floor(zf));
     }
 
     Object writeReplace() { return new Saved(this); }

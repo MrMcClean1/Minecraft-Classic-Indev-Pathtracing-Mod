@@ -52,6 +52,35 @@ public final class Hooks {
         }
     }
 
+    // ------------------------------------------------------------------ Classic's arrow key (Tab is the bot list now)
+
+    private static Object arrowBinding;
+
+    /**
+     * Classic's options make their key bindings array: one more, "Fire arrow" (Q), so it shows in Controls, can be
+     * rebound there and is saved in options.txt like the others. Classic fired arrows with Tab, a fixed key.
+     */
+    public static Object bindings(Object array) {
+        try {
+            Class<?> kb = array.getClass().getComponentType();
+            int n = java.lang.reflect.Array.getLength(array);
+            Object out = java.lang.reflect.Array.newInstance(kb, n + 1);
+            System.arraycopy(array, 0, out, 0, n);
+            arrowBinding = kb.getConstructor(String.class, int.class).newInstance("Fire arrow", Keyboard.KEY_Q);
+            java.lang.reflect.Array.set(out, n, arrowBinding);
+            return out;
+        } catch (Throwable t) {
+            log("arrow key binding: " + t);
+            return array;
+        }
+    }
+
+    /** The key Classic fires an arrow with (in place of its Tab). */
+    public static int arrowKey() {
+        try { if (arrowBinding != null) return arrowBinding.getClass().getField("b").getInt(arrowBinding); } catch (Throwable ignored) {}
+        return Keyboard.KEY_Q;
+    }
+
     private static boolean botsErrorWritten;
 
     /** The bots failed: the log, and (once, with the stack) classicbots-test/error.txt while a bot test folder is there. */

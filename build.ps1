@@ -57,7 +57,8 @@ foreach ($g in @(@{ name = 'indev'; jar = "$lib\com\mojang\minecraft\in-20100223
   $bsrc = "$root\build\bots-$n-src"; $bcls = "$root\build\bots-$n-classes"
   Remove-Item -Recurse -Force $bsrc, $bcls -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Force $bsrc, $bcls | Out-Null
-  foreach ($f in @(Get-ChildItem "$root\bots\src" -Recurse -Filter *.java) + @(Get-ChildItem "$root\bots\$n" -Recurse -Filter *.java)) { # with bots\<game>\shim (Alpha classes the game lacks)
+  # Alpha's shared files, then the bots' own for both games (bots\common), then this game's (a same-named file wins)
+  foreach ($f in @(Get-ChildItem "$root\bots\src" -Recurse -Filter *.java) + @(Get-ChildItem "$root\bots\common" -Filter *.java) + @(Get-ChildItem "$root\bots\$n" -Recurse -Filter *.java)) { # with bots\<game>\shim (Alpha classes the game lacks)
     $t = [IO.File]::ReadAllText($f.FullName).Replace('package com.mrmcclean.classicpt.bots;', "package com.mrmcclean.classicpt.bots.$n;")
     [IO.File]::WriteAllText("$bsrc\$($f.Name)", $t) # a per-game file of the same name replaces the shared one
   }

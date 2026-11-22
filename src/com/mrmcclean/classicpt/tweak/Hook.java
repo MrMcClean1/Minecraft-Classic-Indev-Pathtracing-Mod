@@ -61,9 +61,58 @@ public class Hook implements Injection, Opcodes {
         }
     }
 
+    /**
+     * Classic fires an arrow on Tab (a fixed key): that key is Classic Bots' bot list now. The options' key bindings
+     * array gets one more, "Fire arrow" (Hooks.bindings: in Controls, rebindable, saved), and the Tab check in the
+     * game loop asks Hooks.arrowKey() instead.
+     */
+    private static void hookArrowKey(ClassNodeSource source) {
+        ClassNode opts = source.getClass("com/mojang/minecraft/k"), mc = source.getClass("com/mojang/minecraft/l");
+        if (opts == null || mc == null) { System.setProperty("classicpt.arrows", "no options or game class (" + (opts != null) + ", " + (mc != null) + ")"); return; }
+        boolean bound = false, key = false;
+        for (MethodNode m : opts.methods) {
+            if (!m.name.equals("<init>")) continue;
+            for (AbstractInsnNode n = m.instructions.getFirst(); n != null; n = n.getNext())
+                if (n.getOpcode() == PUTFIELD && ((FieldInsnNode) n).name.equals("s") && ((FieldInsnNode) n).desc.equals("[Lcom/mojang/minecraft/j;")) {
+                    InsnList l = new InsnList();
+                    l.add(new MethodInsnNode(INVOKESTATIC, HOOKS, "bindings", "(Ljava/lang/Object;)Ljava/lang/Object;", false));
+                    l.add(new TypeInsnNode(CHECKCAST, "[Lcom/mojang/minecraft/j;"));
+                    m.instructions.insertBefore(n, l);
+                    bound = true;
+                    break;
+                }
+        }
+        for (MethodNode m : mc.methods) {
+            if (key) break;
+            // in the game's tick (e()V, found by its code rather than its name): getEventKey; bipush 15 (Tab); if_icmpne;
+            // ... instanceof d/c (survival); ... new item/Arrow
+            for (AbstractInsnNode n = m.instructions.getFirst(); n != null; n = n.getNext()) {
+                if (!(n instanceof IntInsnNode) || n.getOpcode() != BIPUSH || ((IntInsnNode) n).operand != 15) continue;
+                AbstractInsnNode prev = n.getPrevious(), next = n.getNext();
+                if (!(prev instanceof MethodInsnNode) || !((MethodInsnNode) prev).name.equals("getEventKey") || next.getOpcode() != IF_ICMPNE) continue;
+                boolean arrow = false;
+                AbstractInsnNode a = next;
+                for (int i = 0; i < 16 && a != null; i++, a = a.getNext())
+                    if (a instanceof TypeInsnNode && ((TypeInsnNode) a).desc.equals("com/mojang/minecraft/item/Arrow")) arrow = true;
+                if (!arrow) continue;
+                m.instructions.set(n, new MethodInsnNode(INVOKESTATIC, HOOKS, "arrowKey", "()I", false));
+                key = true;
+                break;
+            }
+        }
+        String r = bound && key ? "moved" : "not moved (binding " + bound + ", key " + key + ")";
+        if (bound && key) {
+            source.overrideClass(opts);
+            source.overrideClass(mc);
+        }
+        System.setProperty("classicpt.arrows", r); // for the bot test (this goes to the console only)
+        System.out.println("[ClassicPT] arrow key " + r);
+    }
+
     @Override
     public boolean apply(ClassNodeSource source, LaunchConfig config) {
         hookLoader(source);
+        hookArrowKey(source);
         for (String[] t : TARGETS) {
             ClassNode cn = source.getClass(t[0]);
             if (cn == null) continue;

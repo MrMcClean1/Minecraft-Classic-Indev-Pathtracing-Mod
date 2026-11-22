@@ -134,7 +134,11 @@ public final class Compat {
     public static boolean isAlive(Entity e) { return !e.removed && (!(e instanceof MobEntity) || ((MobEntity) e).health > 0); }
 
     /** Alpha's takeDamage: Classic's hurt (ClassicBot sends its own through BotEntity.takeDamage first). */
-    public static boolean takeDamage(Entity e, Entity source, int amount) { e.hurt(source, amount); return true; }
+    public static boolean takeDamage(Entity e, Entity source, int amount) {
+        if (source instanceof BotEntity && amount < 4) amount = 4; // a Classic player's punch (no weapons in Classic; Alpha's bare hand is 1)
+        e.hurt(source, amount);
+        return true;
+    }
 
     public static String getSaveId(Entity e) { return "ClassicBot"; }
 

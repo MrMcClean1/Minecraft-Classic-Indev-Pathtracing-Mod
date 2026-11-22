@@ -53,7 +53,9 @@ Reconstruction and checks each against the native traced picture (`dlss.png`, `r
 The same bots as Alpha PT, Beta PT and the Beta modpack, in Indev 20100223 and Classic 0.30 survival: `/bot on`,
 `/bot spawn [name]`, then talk to them ("Tess follow me", "Tess bring me 16 wood", "Tess set up a base here"...).
 Neither game has a chat box in single player, so **T** (or **/**) opens the bots' own; their lines are drawn over the
-game in Indev and go to the HUD's chat in Classic. Bots are saved in the level and come back when it loads (Indev:
+game in Indev and go to the HUD's chat in Classic. Hold **Tab** for the bot list: each bot, how far, what it is doing
+and what it carries. Classic fired arrows with Tab; with Classic PT that is **Fire arrow** in Controls (Q to start
+with, rebindable there and saved in `options.txt` like the other keys). Bots are saved in the level and come back when it loads (Indev:
 `.mclevel`, entity id `ClassicBot`; Classic: its `.mine` file, which is Java serialization, as the bot's own record).
 Settings in `.minecraft\config\classicbots.properties`.
 
@@ -75,9 +77,12 @@ since Classic's `Mob.tick` is final. The build fails if any game reference doesn
 bots by reflection (`Bots.java`); `tweak\Hook` also lets Indev's level loader ask for unknown entity ids.
 
 Test (either game): an empty file `.minecraft\classicbots-test\run` arms one launch (in the background, muted, the
-mouse never taken, the player can't be hurt): makes a level (Indev; Classic starts in one), spawns a bot, orders it to follow and moves the player 12 blocks
-(the bot has to walk there, a teleport fails), saves the level with the game's own writer, reads it back (bot, owner,
-things), opens it and checks the bot runs. Report in `classicbots-test\<date>\report.txt`; an empty
+mouse never taken, the player can't be hurt): makes a level (Indev; Classic starts in one), spawns a bot, takes a
+picture of it from above (`bot.png`) and of the Tab list over it (`bot-list.png`), types "Tess what do you have" into
+the chat box (`chat-box.png`) and checks the answer, orders it to follow and moves the player 12 blocks (the bot has
+to walk there, a teleport fails), then the jobs by chat: 4 wood, 3 cobblestone, a base, guard (a zombie by it dies),
+a hut (Indev also: a chest chore and smelting iron). Then it saves the level with the game's own writer, reads it
+back (bot, owner, things), opens it and checks the bot runs. Report in `classicbots-test\<date>\report.txt`; an empty
 `classicbots-test\debug` adds the bots' debug log (`log.txt` while a test runs).
 
 ## Where things are in the games (javap)

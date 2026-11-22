@@ -62,11 +62,37 @@ public final class Compat {
         return new Box(b.minXf - (float) x, b.minYf - (float) y, b.minZf - (float) z, b.maxXf + (float) x, b.maxYf + (float) y, b.maxZf + (float) z);
     }
 
-    public static void setPosition(Entity e, double x, double y, double z) { call(SET_POS, e, (float) x, (float) y, (float) z); }
+    public static void setPosition(Entity e, double x, double y, double z) {
+        call(SET_POS, e, (float) x, (float) y, (float) z);
+        refile(e);
+    }
 
     /** Alpha's setPositionAndAngles takes the feet for mobs and the eyes for players; Indev's moveTo adds eyeHeight itself. */
     public static void setPositionAndAngles(Entity e, double x, double y, double z, float yaw, float pitch) {
         e.setPositionAndAnglesf((float) x, (float) y, (float) z, yaw, pitch);
+        refile(e);
+    }
+
+    /**
+     * Indev's entity map keeps each entity in a grid cell (what the renderer draws from): it files an entity again
+     * only when a tick moves it, from where it was at the tick's start (fields B, C, D). A jump between ticks (a bot
+     * waking up at home, catching up with its owner) left it filed where it had been, and it wasn't drawn. Moves it
+     * from that cell to the new one now.
+     */
+    static void refile(Entity e) {
+        World w = world(e);
+        if (w == null || w.entityMap == null || !w.entityMap.all.contains(e)) return;
+        try {
+            Object slot = get(MAP_SLOT, w.entityMap);
+            if (slot == null) return;
+            SLOT_AT.invoke(slot, e.obf$B, e.obf$C, e.obf$D); // the cell it is filed in
+            SLOT_REMOVE.invoke(slot, e);
+            SLOT_AT.invoke(slot, e.xf, e.yf, e.zf);
+            SLOT_ADD.invoke(slot, e);
+            e.obf$B = e.xf; e.obf$C = e.yf; e.obf$D = e.zf;
+        } catch (Exception ex) {
+            Bots.log("Compat: refile: " + ex);
+        }
     }
 
     public static float distanceTo(Entity a, Entity b) { return (float) Math.sqrt(squaredDistanceTo(a, b)); }
@@ -129,6 +155,14 @@ public final class Compat {
 
     private static final java.lang.reflect.Field WORLD = field(Entity.class, "d"), TEXTURE = field(MobEntity.class, "V"), HARDNESS = field(Block.class, "aL");
     private static final java.lang.reflect.Method SET_POS = method(Entity.class, "b", float.class, float.class, float.class);
+    private static final java.lang.reflect.Field MAP_SLOT = field(net.minecraft.world.EntityMap.class, "f");
+    private static final java.lang.reflect.Method SLOT_AT, SLOT_ADD, SLOT_REMOVE;
+    static {
+        Class<?> slot = MAP_SLOT == null ? null : MAP_SLOT.getType();
+        SLOT_AT = slot == null ? null : method(slot, "a", float.class, float.class, float.class);
+        SLOT_ADD = slot == null ? null : method(slot, "a", Entity.class);
+        SLOT_REMOVE = slot == null ? null : method(slot, "b", Entity.class);
+    }
 
     private static java.lang.reflect.Field field(Class<?> c, String n) {
         try { java.lang.reflect.Field f = c.getDeclaredField(n); f.setAccessible(true); return f; } catch (Exception e) { Bots.log("Compat: no field " + n + ": " + e); return null; }

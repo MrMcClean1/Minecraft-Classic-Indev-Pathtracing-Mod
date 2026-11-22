@@ -22,6 +22,7 @@ public final class Entry {
             Bots.init();
             BotsClient.chat = ChatLines::add;
             BotTest.init(mc);
+            drawBots();
         }
         BotTest.frame(mc);
         boolean t = Keyboard.isCreated() && Keyboard.isKeyDown(Keyboard.KEY_T), slash = Keyboard.isCreated() && Keyboard.isKeyDown(Keyboard.KEY_SLASH);
@@ -30,7 +31,28 @@ public final class Entry {
             else if (slash && !slashWas) mc.openScreen(new ChatScreen("/"));
         }
         tWas = t; slashWas = slash;
+        if (mc.world != null && mc.screen == null && Keyboard.isCreated() && Keyboard.isKeyDown(Keyboard.KEY_TAB)) BotList.draw(mc); // hold Tab: the bots
         ChatLines.draw(mc);
+    }
+
+    /**
+     * Indev finds an entity's renderer by its class or that class's direct superclass only: a bot (IndevBot, then
+     * BotEntity, then the game's mob) had none, so it was never drawn. The bot classes get the mob renderer.
+     */
+    private static void drawBots() {
+        try {
+            Class<?> d = Class.forName("net.minecraft.client.a.a.i", true, Entry.class.getClassLoader());
+            Object dispatcher = d.getField("a").get(null);
+            java.lang.reflect.Field f = d.getDeclaredField("e");
+            f.setAccessible(true);
+            @SuppressWarnings("unchecked") java.util.Map<Class<?>, Object> m = (java.util.Map<Class<?>, Object>) f.get(dispatcher);
+            Object mob = m.get(net.minecraft.entity.mob.MobEntity.class);
+            if (mob == null) { Bots.log("no mob renderer to draw bots with"); return; }
+            m.put(BotEntity.class, mob);
+            m.put(IndevBot.class, mob);
+        } catch (Throwable t) {
+            Bots.log("bots won't be drawn: " + t);
+        }
     }
 
     public static Object entity(Object level, String id) {
