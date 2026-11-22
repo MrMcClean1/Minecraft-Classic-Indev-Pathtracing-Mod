@@ -29,6 +29,11 @@ public final class BotTest {
     private BotTest() {}
 
     public static boolean ON;
+    /** While its invulnerability check runs: the test's own keeping-safe is off, the invulnerable switch alone keeps the player alive. */
+    public static boolean REAL;
+    private static boolean invWas;
+    private static int invLow, invLanded;
+    private static int[] lava;
     private static int step, frames;
     private static long stepStart, t0;
     private static boolean generated, music, sound;
@@ -81,7 +86,7 @@ public final class BotTest {
         PlayerEntity p = mc.player;
         if (p == null) return;
         lastState = String.format("player %.1f %.1f %.1f health %d removed %s, screen %s", p.x, p.y, p.z, p.health, p.removed, mc.screen == null ? "none" : mc.screen.getClass().getName());
-        p.health = 20; // the player takes no harm while the test runs
+        if (!REAL) p.health = 20; // the player takes no harm while the test runs (but for the invulnerability check: the switch alone then)
         try { run(mc, p); } catch (Throwable t) { check(false, "step " + step + " threw " + trace(t)); finish(mc); }
     }
 
@@ -189,6 +194,8 @@ public final class BotTest {
         switch (step) {
             case 0:
                 BotConfig.enabled = true; // in memory: not saved
+                // a clean start: bots an earlier run saved in this level (its autospawned ones, a town) would change what this run sees
+                for (BotEntity x : new java.util.ArrayList<>(Bots.bots(w))) { Town.leave(x); Bots.chat(p, "/bot remove " + x.botName()); }
                 next();
                 return;
             case 1: {
@@ -490,6 +497,23 @@ public final class BotTest {
                 String town = Bots.autoTown(p);
                 int in = 0; for (BotEntity x : Bots.bots(w)) if (x.owner.equals(p.name) && x.brain.town != null) in++;
                 check(town != null && in >= 3, "a town founds itself with " + in + " bots on their own: " + town);
+                step = 60; stepStart = System.currentTimeMillis();
+                invWas = BotConfig.invulnerable; BotConfig.invulnerable = true; REAL = true; invLow = 20; invLanded = -1; lava = null;
+                p.setPositionAndAngles(p.x, p.y + 30, p.z, p.yaw, 0); // up 30 blocks
+                return;
+            }
+            case 60: { // player invulnerability (on by default): a 30-block fall, then lava at the feet; the switch alone keeps the player alive
+                invLow = Math.min(invLow, p.health);
+                if (inStep() < 5000) return;
+                if (lava == null) { lava = new int[]{(int) Math.floor(p.x), (int) Math.floor(p.y - 1.62 + 0.01), (int) Math.floor(p.z)}; invLanded = p.health; w.setBlock(lava[0], lava[1], lava[2], 11); return; }
+                if (inStep() < 10000) return; // 5 s in the lava
+                boolean alive = p.health > 0 && !p.removed;
+                for (int dx = -3; dx <= 3; dx++) for (int dy = -1; dy <= 2; dy++) for (int dz = -3; dz <= 3; dz++) {
+                    int id = w.getBlock(lava[0] + dx, lava[1] + dy, lava[2] + dz);
+                    if (id == 10 || id == 11) w.setBlock(lava[0] + dx, lava[1] + dy, lava[2] + dz, 0);
+                }
+                REAL = false; BotConfig.invulnerable = invWas;
+                check(alive && invLanded > 0 && invLow > 0, "player invulnerable: fell 30 blocks (health " + invLanded + " on landing), then 5 s in lava (lowest health " + invLow + "), alive " + alive);
                 finish(mc);
                 return;
             }
