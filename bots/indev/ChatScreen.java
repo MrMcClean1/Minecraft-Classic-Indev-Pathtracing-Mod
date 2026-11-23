@@ -17,6 +17,9 @@ public class ChatScreen extends Screen {
 
     @Override public void tick() { ticks++; }
 
+    /** What the box holds (the bot test types into it with keyPressed). */
+    String typed() { return text; }
+
     @Override
     protected void keyPressed(char c, int key) {
         if (key == Keyboard.KEY_ESCAPE) { minecraft.openScreen(null); return; }
@@ -27,13 +30,16 @@ public class ChatScreen extends Screen {
             return;
         }
         if (key == Keyboard.KEY_BACK) { if (!text.isEmpty()) text = text.substring(0, text.length() - 1); return; }
-        if (c >= ' ' && c != 127 && text.length() < 100) text += c;
+        if (c >= ' ' && c != 127 && text.length() < ChatWrap.MAX_TYPED) text += c; // a full order to a bot: the box grows a line at a time
     }
 
     @Override
     public void render(int mouseX, int mouseY, float delta) {
-        DrawableHelper.fill(2, height - 14, width - 2, height - 2, Integer.MIN_VALUE);
-        textRenderer.drawWithShadow("> " + text + (ticks / 6 % 2 == 0 ? "_" : ""), 4, height - 12, 0xE0E0E0);
+        java.util.List<String> l = ChatWrap.wrap(s -> textRenderer.getWidth(s), "> " + text + (ticks / 6 % 2 == 0 ? "_" : ""), width - 8);
+        int top = height - 2 - 12 * l.size();
+        DrawableHelper.fill(2, top, width - 2, height - 2, Integer.MIN_VALUE);
+        for (int i = 0; i < l.size(); i++) textRenderer.drawWithShadow(l.get(i), 4, top + 2 + 12 * i, 0xE0E0E0);
+        ChatWrap.typedLines = l.size();
     }
 
     @Override public boolean shouldPauseGame() { return false; }

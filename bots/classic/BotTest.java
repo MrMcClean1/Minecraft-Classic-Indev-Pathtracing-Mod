@@ -30,6 +30,27 @@ public final class BotTest {
     public static boolean ON;
     /** While its invulnerability check runs: the test's own keeping-safe is off, the invulnerable switch alone keeps the player alive. */
     public static boolean REAL;
+    private static String chatBefore = "replies";
+    private static int quietBase, quietSaid, quietAsk, typedLinesSeen, replyPieces, chatStage;
+    private static long askedAt;
+    private static String typedHeld = "";
+    private static final String LONG = "Tess what are you doing right now? This is a long line to check that the chat box wraps onto more lines instead of running off the edge of the screen, and that it arrives whole.";
+    private static final String LONG_REPLY = "This is a long reply from a bot, long enough that it has to wrap onto a second and third line on the screen instead of running off the right edge where nobody could read it.";
+
+    /** After the quiet check: the extra bots sent off, Tess following again, on to the long chat check. */
+    private static void quietDone(PlayerEntity p) {
+        Bots.chat(p, "/bot town stop");
+        for (BotEntity x : new java.util.ArrayList<>(Bots.bots(world))) if (x.owner.equals(p.name) && !x.botName().equals("Tess")) Bots.chat(p, "/bot remove " + x.botName());
+        Bots.chat(p, "Tess follow me");
+        step = 63; stepStart = System.currentTimeMillis(); chatStage = 0;
+    }
+
+    /** Then the player's invulnerability: off (normal play) first, a hit. */
+    private static void invulnerableNext(PlayerEntity p) {
+        step = 61; stepStart = System.currentTimeMillis();
+        invWas = BotConfig.invulnerable; BotConfig.invulnerable = false; REAL = true; p.health = 20;
+        p.takeDamage(null, 4); // normal play first: a hit
+    }
     private static boolean invWas;
     private static int invLow, invLanded;
     private static int[] lava;
@@ -452,8 +473,8 @@ public final class BotTest {
                 BotConfig.nametags = true;
                 check(tagsOn > 0 && off == 0, "names over the bots: drawn " + tagsOn + " times in 3 s with the switch on, " + off + " with it off");
                 // bot chat levels: replies lets an answer through but not an update; off lets nothing through
-                BotConfig.botChat = "replies";
-                b.brain.replyUntil = 0;
+                chatBefore = BotConfig.botChat; BotConfig.botChat = "replies";
+                b.brain.replyUntil = 0; b.brain.ordered = false; // not spoken to, and not on an order of yours either
                 spokenBefore = b.brain.spoken;
                 b.brain.say("Just an update on what I'm doing.");
                 updateLeaked = b.brain.spoken != spokenBefore;
@@ -468,7 +489,7 @@ public final class BotTest {
                 if (!offAsked) { answered = b.brain.spoken > spokenBefore; BotConfig.botChat = "off"; spokenBefore = b.brain.spoken; say(p, "Tess what next?"); offAsked = true; return; }
                 if (inStep() < 5000) return;
                 boolean silent = b.brain.spoken == spokenBefore;
-                BotConfig.botChat = "all";
+                BotConfig.botChat = chatBefore; // back to what it was (replies by default)
                 check(!updateLeaked && answered && silent, "bot chat: replies keeps updates quiet (" + !updateLeaked + ") and answers (" + answered + "); off says nothing (" + silent + ")");
                 // bots join you by themselves (autoSpawn, 3 as in Tekkit): your bots made up to 3, on their own; then a town of their own
                 Bots.spawnUpTo(p);
@@ -495,9 +516,55 @@ public final class BotTest {
                 String town = Bots.autoTown(p);
                 int in = 0; for (BotEntity x : Bots.bots(w)) if (x.owner.equals(p.name) && x.brain.town != null) in++;
                 check(town != null && in >= 3, "a town founds itself with " + in + " bots on their own: " + town);
+                step = 62; stepStart = System.currentTimeMillis(); quietBase = -1; quietAsk = -1; // quiet by default next, then long chat, then invulnerability
+                return;
+            }
+            case 62: { // quiet by default (botChat=replies): the bots at work say nothing for a minute, then answer when asked
+                BotEntity asked = null;
+                int all = 0;
+                for (BotEntity x : Bots.bots(w)) if (x.owner.equals(p.name)) { all += x.brain.spoken; if (asked == null && !x.botName().equals("Tess")) asked = x; }
+                if (inStep() < 31000) return; // from when Tess's 30 s reply window is over
+                if (quietBase < 0) { quietBase = all; return; }
+                if (inStep() < 91000) return;
+                if (asked == null) { check(false, "quiet by default: no bot of yours at work"); quietDone(p); return; }
+                if (quietAsk < 0) { quietSaid = all - quietBase; quietAsk = asked.brain.spoken; askedAt = inStep(); say(p, asked.botName() + " what are you doing"); return; }
+                if (asked.brain.spoken == quietAsk && inStep() - askedAt < 25000) return; // a model-worded answer can take 20 s
+                check("replies".equals(BotConfig.botChat) && quietSaid == 0, "quiet by default (botChat " + BotConfig.botChat + "): the bots said " + quietSaid + " lines in a minute of work, nothing asked");
+                check(asked.brain.spoken > quietAsk, "...and " + asked.botName() + " answers when asked: \"" + asked.brain.lastReport + "\"");
+                quietDone(p);
+                return;
+            }
+            case 63: { // long chat: a long typed line wraps in the chat box and is sent whole; a long bot reply wraps on screen (chat-wrap.png)
+                BotEntity t = bot(w);
+                if (chatStage == 0) { mc.openScreen(new ChatScreen("")); chatStage = 1; return; }
+                if (chatStage == 1 && inStep() > 500) {
+                    if (!(mc.screen instanceof ChatScreen)) { check(false, "long chat: the chat box didn't open"); invulnerableNext(p); return; }
+                    ChatScreen cs = (ChatScreen) mc.screen;
+                    for (char c : LONG.toCharArray()) cs.keyPressed(c, 0);
+                    typedHeld = cs.typed();
+                    ChatWrap.pieces = 0;
+                    if (t != null) { t.brain.replyUntil = t.ticks + 200; t.brain.say(LONG_REPLY); }
+                    chatStage = 2; return;
+                }
+                if (chatStage == 2 && inStep() > 1500) { typedLinesSeen = ChatWrap.typedLines; replyPieces = ChatWrap.pieces; ChatWrap.grabTo = new File(dir, "chat-wrap.png"); chatStage = 3; return; } // saved once the chat lines are drawn
+                if (chatStage == 3 && inStep() > 2000) {
+                    if (mc.screen instanceof ChatScreen) ((ChatScreen) mc.screen).keyPressed('\r', org.lwjgl.input.Keyboard.KEY_RETURN);
+                    chatStage = 4; return;
+                }
+                if (chatStage == 4 && inStep() > 3000) {
+                    check(LONG.equals(typedHeld) && typedLinesSeen >= 2 && LONG.equals(Bots.lastTyped), "a long typed line (" + LONG.length() + " characters) wraps in the chat box (" + typedLinesSeen + " lines) and is sent whole (" + LONG.equals(Bots.lastTyped) + ")");
+                    check(replyPieces >= 2, "a long bot reply wraps on screen: " + replyPieces + " lines (picture chat-wrap.png)");
+                    invulnerableNext(p);
+                }
+                return;
+            }
+            case 61: { // normal play (invulnerable off, the default): a hit hurts
+                if (inStep() < 300) return;
+                int h = p.health; p.health = 20;
+                check(!invWas && h < 20, "invulnerable off by default (" + !invWas + "): a hit (4) hurts in normal play (health " + h + " of 20)");
                 step = 60; stepStart = System.currentTimeMillis();
-                invWas = BotConfig.invulnerable; BotConfig.invulnerable = true; REAL = true; invLow = 20; invLanded = -1; lava = null;
-                p.setPositionAndAngles(p.x, p.y + 30, p.z, p.yaw, 0); // up 30 blocks
+                BotConfig.invulnerable = true; invLow = 20; invLanded = -1; lava = null;
+                p.setPositionAndAngles(p.x, p.y + 30, p.z, p.yaw, 0); // then with it on: up 30 blocks
                 return;
             }
             case 60: { // player invulnerability (off by default): a 30-block fall, then lava at the feet; the switch alone keeps the player alive
