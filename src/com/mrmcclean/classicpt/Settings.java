@@ -11,7 +11,7 @@ import java.util.Properties;
  * version): F7 on/off, F4 preset (Fast, Standard, Fancy), F9 denoiser (OFF, Standard, Advanced), F10 look (Beta,
  * Traced, Realistic), F6 photo mode (when photo.enabled), Home the view (path traced, colours, normals, light),
  * Page Down a time-lapse keyframe and Page Up records it (when timelapse.enabled).
- * The file also holds what has no key here (these old versions have no mod menu): bounces, render scale,
+ * The settings screen (F12, SettingsUi) sets all of it; the file also holds what has no key: bounces, render scale,
  * brightness, sharpening, reflections, cloud shadows, fog and trace distance, the effects, photo and time-lapse.
  * NVIDIA RTX (as the other tracers' Effects > NVIDIA RTX, all off by default, an RTX card and the DLLs in
  * .minecraft/betapt-nvidia needed): upscaler=dlss (its mode from renderScale), rayReconstruction, frameGeneration,

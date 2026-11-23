@@ -6,14 +6,15 @@ import org.lwjgl.opengl.GL11;
 /**
  * Called from the game's own bytecode (see tweak.Hook). The path tracer is off when the game starts. Keys, the same
  * as the Alpha and Beta path tracers': F7 on/off, F4 preset, F9 denoiser, F10 look, F6 photo mode, Home the view,
- * Page Down a time-lapse keyframe and Page Up records (photo mode and the time-lapse when switched on in the file).
+ * Page Down a time-lapse keyframe and Page Up records (photo mode and the time-lapse when switched on in the file);
+ * F12 opens the Path Tracer Settings screen (SettingsUi), where everything in the file can be set.
  * Each change shows in the game's chat (and the log) and is saved to classicpt.properties.
  */
 public final class Hooks {
     private Hooks() {}
 
     static final int[] KEYS = {Keyboard.KEY_F7, Keyboard.KEY_F4, Keyboard.KEY_F9, Keyboard.KEY_F10, Keyboard.KEY_F6, Keyboard.KEY_HOME,
-            Keyboard.KEY_NEXT, Keyboard.KEY_PRIOR};
+            Keyboard.KEY_NEXT, Keyboard.KEY_PRIOR, Keyboard.KEY_F12};
     static Game game;
     static Tracer tracer;
     static boolean enabled;
@@ -182,6 +183,7 @@ public final class Hooks {
                 else say(TimeLapse.start(game, tracer));
                 return;
             case 5: s.view = (s.view + 1) % Settings.VIEWS.length; say("Path tracer view: " + Settings.VIEWS[s.view]); break;
+            case 8: game.openSettings(); return;
         }
         s.save();
         tracer.resetHistory();

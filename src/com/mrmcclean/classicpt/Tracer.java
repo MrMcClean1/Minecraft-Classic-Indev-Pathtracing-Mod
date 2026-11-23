@@ -448,6 +448,18 @@ final class Tracer {
         GL20.glUniform1f(loc(prog, "uCloudY"), sy + 2);
         GL20.glUniform1f(loc(prog, "uCloudShadow"), cloudsTex == 0 ? 0f : st.cloudShadows);
         GL20.glUniform1f(loc(prog, "uFogEnd"), st.fogDistance);
+        // the sky the camera sees: the game's own (its sky plane at the level's height + 10 in the level's sky colour,
+        // its clouds, under the fog the game set up this frame), so the traced sky is the game's colour, not paler
+        readGameFog(skyRgb);
+        GL20.glUniform3f(loc(prog, "uGameSky"), (skyRgb >> 16 & 255) / 255f, (skyRgb >> 8 & 255) / 255f, (skyRgb & 255) / 255f);
+        GL20.glUniform3f(loc(prog, "uGameFog"), gameFog[0], gameFog[1], gameFog[2]);
+        int cloudRgb = g.cloudColor();
+        GL20.glUniform3f(loc(prog, "uGameCloud"), (cloudRgb >> 16 & 255) / 255f, (cloudRgb >> 8 & 255) / 255f, (cloudRgb & 255) / 255f);
+        GL20.glUniform2f(loc(prog, "uGameFogRange"), gameFog[3], gameFog[4]);
+        GL20.glUniform1f(loc(prog, "uSkyPlaneY"), sy + 10);
+        GL20.glUniform1f(loc(prog, "uExposure"), 0.5f);
+        GL20.glUniform1f(loc(prog, "uBrightness"), st.brightness);
+        GL20.glUniform1i(loc(prog, "uLook"), st.view == 0 ? st.look : 1);
         float held = st.heldLight && g.holdingTorch() ? 1f : 0f;
         GL20.glUniform4f(loc(prog, "uHeld"), v[0] + rx * 0.4f, v[1] - 0.3f, v[2] + rz * 0.4f, held);
         GL20.glUniform2f(loc(prog, "uJitter"), jitX, jitY);
@@ -606,6 +618,29 @@ final class Tracer {
         float f = 1, x = 0;
         while (i > 0) { f /= base; x += f * (i % base); i /= base; }
         return x;
+    }
+
+    /** The game's fog for its sky: colour (0..1), linear start and end in blocks. */
+    final float[] gameFog = {-1, 0, 0, 0, 256};
+    private final FloatBuffer fogBuf = BufferUtils.createFloatBuffer(16);
+
+    /**
+     * The fog the game set up for this frame's terrain (read from OpenGL right after the game drew it, afterTerrain):
+     * Classic fogs linearly from 0, Indev from a quarter of the distance, both to the view distance, in a colour
+     * between the level's fog and sky colours. Only linear fog is taken (the dense fog under water or lava is not the
+     * sky's); until the first reading, the level's sky colour lightened as Classic's fog is.
+     */
+    private void readGameFog(int skyRgb) {
+        if (gameFog[0] < 0) {
+            for (int k = 0; k < 3; k++) gameFog[k] = 0.3f * ((skyRgb >> (16 - 8 * k)) & 255) / 255f + 0.7f;
+        }
+        if (!underGame || GL11.glGetInteger(GL11.GL_FOG_MODE) != GL11.GL_LINEAR) return;
+        fogBuf.clear();
+        GL11.glGetFloat(GL11.GL_FOG_COLOR, fogBuf);
+        float start = GL11.glGetFloat(GL11.GL_FOG_START), end = GL11.glGetFloat(GL11.GL_FOG_END);
+        if (end <= start || end <= 0) return;
+        gameFog[0] = fogBuf.get(0); gameFog[1] = fogBuf.get(1); gameFog[2] = fogBuf.get(2);
+        gameFog[3] = start; gameFog[4] = end;
     }
 
     /** jitter x, y in pixels, tan(half fov y), near, camera position, forward, right, up (VkNv.dlss). */

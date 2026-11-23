@@ -67,6 +67,19 @@ foreach ($g in @(@{ name = 'indev'; jar = "$lib\com\mojang\minecraft\in-20100223
   & "$jdk\java.exe" -cp $remapCp "$root\tools\Remap.java" back $g.jar "$root\bots\$n.mappings" $bcls "com/mrmcclean/classicpt/bots/$n/Compat" 2>$null
   if ($LASTEXITCODE -ne 0) { throw "remap ($n, back) failed" }
   Copy-Item -Recurse "$bcls\com" "$root\build\classes\" -Force
+  # Classic PT's settings screen (gui\, the game's own screen class): built the same way, package gui.<game>
+  $gsrc = "$root\build\gui-$n-src"; $gcls = "$root\build\gui-$n-classes"
+  Remove-Item -Recurse -Force $gsrc, $gcls -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Force $gsrc, $gcls | Out-Null
+  foreach ($f in Get-ChildItem "$root\gui" -Filter *.java) {
+    $t = [IO.File]::ReadAllText($f.FullName).Replace('package com.mrmcclean.classicpt.gui;', "package com.mrmcclean.classicpt.gui.$n;")
+    [IO.File]::WriteAllText("$gsrc\$($f.Name)", $t)
+  }
+  & "$jdk\javac.exe" --release 8 -nowarn -Xlint:-options -encoding UTF-8 -cp "$named;$lwjgl2;$root\build\classes" -d $gcls (Get-ChildItem $gsrc -Filter *.java | ForEach-Object FullName)
+  if ($LASTEXITCODE -ne 0) { throw "javac (gui, $n) failed" }
+  & "$jdk\java.exe" -cp $remapCp "$root\tools\Remap.java" back $g.jar "$root\bots\$n.mappings" $gcls "com/mrmcclean/classicpt/gui/$n/Compat"
+  if ($LASTEXITCODE -ne 0) { throw "remap ($n, gui back) failed" }
+  Copy-Item -Recurse "$gcls\com" "$root\build\classes\" -Force
 }
 
 $jar = "$root\build\classicpt-$Version.jar"

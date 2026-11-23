@@ -5,7 +5,9 @@ A path tracer for two survival versions of early Minecraft: **Classic 0.30 (surv
 these versions need: Classic and Indev keep the whole level in one array, so the level goes to the GPU as one
 3D texture and one compute shader traces it.
 
-Off when the game starts. **F7** turns it on and off.
+On when the game starts (`enabled=false` in `classicpt.properties` starts it off). **F7** turns it on and off,
+**F12** opens its settings screen (Path Tracer Settings, Effects, NVIDIA RTX, Photo and time-lapse; every change is
+saved to `classicpt.properties` at once). The sky the camera sees is the game's own: its colours, clouds and fog.
 
 What it traces: every block with the game's own terrain.png and face textures (read from the game's tile classes),
 sunlight and its shadows, light from torches, fire and lava, two bounces of light ending in the sky, see-through
@@ -30,8 +32,8 @@ a level that has them).
 
 ## NVIDIA RTX (opt-in)
 
-On an RTX card, as in the Alpha, Beta and Tekkit tracers, all off by default and set in `.minecraft\classicpt.properties`
-(these versions have no mod menu): `upscaler=dlss` (DLSS super resolution, its mode from `renderScale`: 1 DLAA,
+On an RTX card, as in the Alpha, Beta and Tekkit tracers, all off by default and set on the settings screen (F12,
+NVIDIA RTX...) or in `.minecraft\classicpt.properties`: `upscaler=dlss` (DLSS super resolution, its mode from `renderScale`: 1 DLAA,
 0.67 Quality, 0.58 Balanced, 0.5 Performance, lower Ultra Performance), `rayReconstruction=true` (with DLSS:
 NVIDIA's denoiser replaces the tracer's own), `frameGeneration=true` (with DLSS), `lowLatency=2` (Reflex).
 They need NVIDIA's Streamline DLLs in `.minecraft\betapt-nvidia` (the same folder and files as the other tracers;

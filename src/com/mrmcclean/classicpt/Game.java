@@ -91,6 +91,11 @@ final class Game {
         try { return indev ? 0x99CCFF : field(level.getClass(), "skyColor").getInt(level); } catch (Exception e) { return 0x99CCFF; }
     }
 
+    /** The clouds' colour: Classic's level says (white by default); Indev's are white. */
+    int cloudColor() {
+        try { return indev ? 0xFFFFFF : field(level.getClass(), "cloudColor").getInt(level); } catch (Exception e) { return 0xFFFFFF; }
+    }
+
     Object player() {
         try {
             Object p = fPlayer.get(mc);
@@ -294,16 +299,38 @@ final class Game {
     private Method setScreen;
     private Field screen;
 
-    /** Closes whatever menu is open (the setter that takes the type of Minecraft's field o, the open screen). */
+    /** The open-screen field o and its setter (the method that takes o's type); found once, whichever asks first. */
+    private void findScreen() throws Exception {
+        if (screen == null) screen = field(mc.getClass(), "o");
+        if (setScreen == null)
+            for (Method m : mc.getClass().getMethods())
+                if (m.getParameterTypes().length == 1 && m.getParameterTypes()[0] == screen.getType()) setScreen = m;
+    }
+
+    /** Closes whatever menu is open. */
     void closeScreen() {
         try {
-            if (screen == null) {
-                screen = field(mc.getClass(), "o");
-                for (Method m : mc.getClass().getMethods())
-                    if (m.getParameterTypes().length == 1 && m.getParameterTypes()[0] == screen.getType()) setScreen = m;
-            }
+            findScreen();
             if (setScreen != null && screen.get(mc) != null) setScreen.invoke(mc, (Object) null);
         } catch (Exception ignored) {
         }
+    }
+
+    /** Opens Classic PT's settings screen (gui/PtScreen, built for this game). False if it couldn't. */
+    boolean openSettings() {
+        try {
+            findScreen();
+            Class<?> c = Class.forName("com.mrmcclean.classicpt.gui." + (indev ? "indev" : "classic") + ".PtScreen", true, mc.getClass().getClassLoader());
+            setScreen.invoke(mc, c.getConstructor().newInstance());
+            return true;
+        } catch (Throwable t) {
+            Hooks.log("settings screen: " + t);
+            return false;
+        }
+    }
+
+    /** The open screen's class name, or null. */
+    String screenName() {
+        try { findScreen(); Object s = screen.get(mc); return s == null ? null : s.getClass().getName(); } catch (Exception e) { return null; }
     }
 }

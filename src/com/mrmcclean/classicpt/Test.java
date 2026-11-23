@@ -47,7 +47,19 @@ final class Test {
     private static String dlssSize = "", rrSize = "", nvAfterDlss = "", nvAfterRr = "";
     private static float keptScale;
     private static int keptUpscaler;
-    private static boolean keptRr;
+    private static boolean keptRr, keptFg, reflexOn;
+    private static int keptLowLatency;
+    private static String nvReflex = "", nvFg = "", fgPresent = "";
+    // the sky check: the game's own sky and the traced one, looking up at a few pitches
+    private static final float[] SKY_PITCH = {-80f, -50f, -25f, -5f, 5f, 18f};
+    private static final BufferedImage[] gameSky = new BufferedImage[SKY_PITCH.length], tracedSky = new BufferedImage[SKY_PITCH.length];
+    private static int skyI;
+    // the settings screen check (F12): its pages as pictures, and what each step did
+    private static final String[] UI_PAGES = {"Effects...", "NVIDIA RTX...", "Photo, time-lapse..."};
+    private static final BufferedImage[] uiPics = new BufferedImage[1 + UI_PAGES.length];
+    private static int uiI, uiGrab = -1; // uiGrab: which settings picture frame() takes (after the screen has drawn)
+    private static boolean uiOpened, uiStepped, uiSaved, uiPagesOk = true, uiClosed;
+    private static String uiNote = "";
     private static final List<String> lines = new ArrayList<String>();
     private static int passed, failed;
     private static int[] placed;
@@ -115,7 +127,8 @@ final class Test {
         frames++;
         if (Mouse.isCreated() && Mouse.isGrabbed()) Mouse.setGrabbed(false); // never take the mouse from MrMcClean
         g.keepAlive();                                                      // nor let the test's player die
-        g.closeScreen();                                                    // the pause menu a background window gets
+        if (uiGrab >= 0) { uiPics[uiGrab] = grab(); uiGrab = -1; }
+        if (stage < 80 || stage > 89) g.closeScreen();                       // the pause menu a background window gets (not the settings screen under test)
         if (g.level() == null) {
             if (g.indev && frames > 100 && !generated) { generated = true; note("making a small level"); g.generateLevel(); }
             if (frames > 3000) finish("no level after 3000 frames");
@@ -127,11 +140,12 @@ final class Test {
         if (!placedOnTop) { placedOnTop = true; onTop(); } // the saved level may have left the player in a cave
         if (towardSun) g.setView(137f - (g.indev ? 180f : 0f), -15f); // the god rays check: toward the sun (Indev's view turns by 180)
         else if (stage >= 50 && stage < 60) g.setView(135f, 89f); // the crack check: straight down at the block underfoot
+        else if (stage == 70 || stage == 71) g.setView(135f, SKY_PITCH[skyI]); // the sky check: looking up
         else g.setView(135f, 18f); // look over the level, a little down
         if (stage >= 50 && stage < 60) crack(stage == 51 || stage == 53 ? 0.6f : 0f);
         switch (stage) {
             case 0: // let the game build its picture of the level
-                if (++wait > 300) { stage = 1; wait = 0; Hooks.enabled = false; } // after the move to the surface, the game redraws its picture there
+                if (++wait > 300) { stage = 70; wait = 0; skyI = 0; Hooks.enabled = false; } // after the move to the surface, the game redraws its picture there
                 break;
             case 1:
                 if (++wait > 30) { game = grab(); stage = 2; wait = 0; Hooks.enabled = true; Hooks.tracer.resetHistory(); }
@@ -145,6 +159,53 @@ final class Test {
         if (!running() || g.level() == null || g.player() == null) return;
         Tracer t = Hooks.tracer;
         switch (stage) {
+            case 70: // the sky check: the game's own sky at this pitch, then the traced one
+                if (++wait > 15) { gameSky[skyI] = grab(); Hooks.enabled = true; t.resetHistory(); stage = 71; wait = 0; }
+                break;
+            case 71:
+                if (t.history() >= 24 || ++wait > 300) {
+                    tracedSky[skyI] = grab();
+                    Hooks.enabled = false; wait = 0;
+                    if (++skyI < SKY_PITCH.length) stage = 70; else { skyI = 0; stage = 80; Hooks.enabled = true; }
+                }
+                break;
+            case 80: // the settings screen, opened as F12 does
+                if (wait++ == 0) { g.openSettings(); break; }
+                if (wait < 12) break;
+                String sn = g.screenName();
+                uiOpened = sn != null && sn.endsWith(".PtScreen") && SettingsUi.current != null;
+                if (!uiOpened) { uiNote = "open screen: " + sn; stage = 1; wait = 0; Hooks.enabled = false; break; }
+                uiGrab = 0;
+                { // a step on Denoiser changes the setting and saves it; two more steps put it back
+                    SettingsUi ui = SettingsUi.current;
+                    int before = t.settings.denoiser;
+                    ui.click("Denoiser", 1);
+                    uiStepped = t.settings.denoiser == (before + 1) % 3;
+                    java.util.Properties pr = new java.util.Properties();
+                    try (java.io.FileInputStream in = new java.io.FileInputStream("classicpt.properties")) { pr.load(in); } catch (Exception ignored) {}
+                    String saved = pr.getProperty("denoise") + "/" + pr.getProperty("denoiser");
+                    uiSaved = t.settings.denoiser == 0 ? "false/advanced".equals(saved) || "false/standard".equals(saved)
+                            : (t.settings.denoiser == 1 ? "true/standard" : "true/advanced").equals(saved);
+                    ui.click("Denoiser", 1); ui.click("Denoiser", 1);
+                    uiNote = "main page: " + ui.labels();
+                    if (t.settings.denoiser != before) uiStepped = false;
+                }
+                uiI = 0; stage = 81; wait = 0;
+                break;
+            case 81: // each inner page, then Back
+                if (wait++ == 0) { if (!SettingsUi.current.click(UI_PAGES[uiI], 1)) uiPagesOk = false; break; }
+                if (wait < 10) break;
+                if (wait == 10) { uiGrab = 1 + uiI; if (!SettingsUi.current.title().equals(UI_PAGES[uiI].replace("...", ""))) uiPagesOk = false; break; }
+                SettingsUi.current.click("Back", 1);
+                wait = 0;
+                if (++uiI >= UI_PAGES.length) stage = 82;
+                break;
+            case 82: // Done closes it
+                if (wait++ == 0) { SettingsUi.current.click("Done", 1); break; }
+                if (wait < 10) break;
+                uiClosed = g.screenName() == null;
+                stage = 1; wait = 0; Hooks.enabled = false;
+                break;
             case 2: // add up a still picture
                 if (t.failed) { finish(null); return; }
                 if (Hooks.enabled) {
@@ -192,7 +253,25 @@ final class Test {
                 if (t.rrActive && t.rrFrames >= 90 || ++wait > 900 || VkBridge.failed() || t.rrFailed) {
                     if (t.rrActive) rrPic = grab();
                     rrDone = t.rrFrames; rrSize = t.renderSize(); nvAfterRr = VkBridge.status;
+                    keptLowLatency = t.settings.lowLatency;
+                    t.settings.lowLatency = 2; // NVIDIA Reflex
+                    stage = 12; wait = 0;
+                }
+                break;
+            case 12: // Reflex: on and marking frames
+                if (++wait > 40) {
+                    reflexOn = VkBridge.reflexOn(); nvReflex = VkBridge.status;
+                    t.settings.lowLatency = keptLowLatency;
+                    keptFg = t.settings.frameGeneration;
+                    t.settings.frameGeneration = true; // DLSS Frame Generation: its Vulkan window over the game's
+                    stage = 13; wait = 0;
+                }
+                break;
+            case 13:
+                if (++wait > 90) {
+                    fgPresent = VkBridge.presentStatus; nvFg = VkBridge.status;
                     Settings s = t.settings;
+                    s.frameGeneration = keptFg;
                     s.renderScale = keptScale; s.upscaler = keptUpscaler; s.rayReconstruction = keptRr;
                     t.resetHistory();
                     photoStart(t);
@@ -215,7 +294,7 @@ final class Test {
                 if (stage == 24) {
                     double d = diff(read(shots[0]), read(shots[4]));
                     check(d > Math.max(0.004, noise32 * 2), String.format("depth of field changes the still (difference to the sharp one %.4f)", d));
-                    s.photoAperture = keptAperture; s.photoSamples = keptSamples; s.photoEnabled = keptPhoto;
+                    s.photoAperture = keptAperture; s.photoSamples = keptSamples; s.photoEnabled = keptPhoto; s.clouds = keptClouds;
                     timeLapseStart(t);
                     break;
                 }
@@ -406,7 +485,7 @@ final class Test {
     // ---- photo mode and the time-lapse
     private static final File[] shots = new File[5];
     private static double noise32;
-    private static boolean keptPhoto, keptTl;
+    private static boolean keptPhoto, keptTl, keptClouds;
     private static int keptSamples, keptTlFrames;
     private static float keptAperture;
     private static float[] tlStart;
@@ -432,6 +511,7 @@ final class Test {
         Settings dflt = new Settings();
         check(!dflt.photoEnabled && !dflt.timelapseEnabled && dflt.sharpen == 0f && dflt.photoAperture == 0f, "photo mode, the time-lapse, sharpening and depth of field are off by default");
         keptPhoto = s.photoEnabled; keptSamples = s.photoSamples; keptAperture = s.photoAperture;
+        keptClouds = s.clouds; s.clouds = false; // the stills are compared for noise: clouds drift between them as the game's do
         s.photoEnabled = true; s.photoSamples = 32; s.photoAperture = 0f;
         Hooks.enabled = true;
         t.startPhoto(null, null);
@@ -487,6 +567,32 @@ final class Test {
                 img.setRGB(x, y, (b.get(i) & 255) << 16 | (b.get(i + 1) & 255) << 8 | (b.get(i + 2) & 255));
             }
         return img;
+    }
+
+    /**
+     * The sky in both pictures (the top rowsPercent of rows): the mean of the pixels that are sky in both (blue at
+     * least as strong as green and red, and not a near-white cloud). Returns game rgb, traced rgb, the largest channel
+     * difference; null with too few sky pixels.
+     */
+    private static double[] skyMatch(BufferedImage a, BufferedImage b, int rowsPercent) {
+        double[] s = new double[7];
+        int n = 0;
+        for (int y = 0; y < a.getHeight() * rowsPercent / 100; y += 2)
+            for (int x = 0; x < a.getWidth(); x += 2) {
+                int p = a.getRGB(x, y), q = b.getRGB(x, y);
+                if (!skyLike(p) || !skyLike(q)) continue;
+                for (int k = 0; k < 3; k++) { s[k] += p >> (16 - 8 * k) & 255; s[3 + k] += q >> (16 - 8 * k) & 255; }
+                n++;
+            }
+        if (n < 100) return null;
+        for (int k = 0; k < 6; k++) s[k] /= n;
+        for (int k = 0; k < 3; k++) s[6] = Math.max(s[6], Math.abs(s[k] - s[3 + k]));
+        return s;
+    }
+
+    private static boolean skyLike(int p) {
+        int r = p >> 16 & 255, g = p >> 8 & 255, b = p & 255;
+        return b >= g && g >= r - 4 && b > 120 && !(r > 245 && g > 245 && b > 245);
     }
 
     private static double[] stats(BufferedImage img) {
@@ -565,6 +671,26 @@ final class Test {
             // textures: the game's picture against the tracer's Colours view (light differs on purpose: torches, shadows)
             double h = colours == null ? 0 : hueAgreement(game, colours);
             check(h >= 0.6, String.format("textures: colours agree with the game's picture in %.0f%% of the grid (60%% needed)", h * 100));
+            float[] gf = t.gameFog;
+            note(String.format("the game's fog (read by the tracer): colour %.0f %.0f %.0f, %.0f to %.0f blocks; sky plane at %d, camera at %.1f",
+                    gf[0] * 255, gf[1] * 255, gf[2] * 255, gf[3], gf[4], g.sizeY() + 10, g.view(0)[1]));
+            check(uiOpened, "settings screen: F12 opens it" + (uiOpened ? "" : " (" + uiNote + ")"));
+            if (uiOpened) {
+                note(uiNote);
+                check(uiStepped && uiSaved, "settings screen: a click steps the denoiser and saves it to classicpt.properties, two more put it back");
+                check(uiPagesOk, "settings screen: Effects, NVIDIA RTX and Photo, time-lapse open and go back");
+                check(uiClosed, "settings screen: Done closes it");
+            }
+            double worst = 0;
+            int views = 0;
+            for (int i = 0; i < SKY_PITCH.length; i++) {
+                double[] sky = gameSky[i] == null || tracedSky[i] == null ? null : skyMatch(gameSky[i], tracedSky[i], 100);
+                if (sky == null) { note("sky at pitch " + SKY_PITCH[i] + ": no sky in both pictures"); continue; }
+                views++;
+                worst = Math.max(worst, sky[6]);
+                note(String.format("sky at pitch %.0f: game %.0f %.0f %.0f, traced %.0f %.0f %.0f (cloud-free sky pixels in both)", SKY_PITCH[i], sky[0], sky[1], sky[2], sky[3], sky[4], sky[5]));
+            }
+            check(views > 0 && worst < 14, String.format("sky: the traced sky is the game's colour, looking up at %d pitches (largest difference %.0f of 255)", views, worst));
             note(String.format("tracer frame time (CPU side, GPU queued) %.2f ms over %d frames, %d lights", msSum / Math.max(1, tracedFrames), tracedFrames, t.lightCount));
             note(String.format("whole frame time while tracing %.2f ms (%.0f fps) over %d frames at %d x %d, render scale %.2f", frameMsSum / Math.max(1, frameCount), 1000.0 / Math.max(0.001, frameMsSum / Math.max(1, frameCount)), frameCount, g.width(), g.height(), t.settings.renderScale));
         } else check(false, "both pictures taken");
@@ -575,6 +701,9 @@ final class Test {
             rtxPicture(dlssPic, "DLSS");
             check(rrDone >= 90 && rrPic != null, "Ray Reconstruction made " + rrDone + " frames (" + rrSize + ")" + (t.rrFailed ? ", then refused: " + nvAfterRr : ""));
             rtxPicture(rrPic, "Ray Reconstruction");
+            check(reflexOn, "NVIDIA Reflex starts and marks frames (" + nvReflex + ")");
+            check(fgPresent.matches("Vulkan window: \\d+x\\d+.*"), "Frame Generation starts: frames go out through its Vulkan window (" + fgPresent + "; " + nvFg + ")");
+            note("Frame Generation makes frames only in a focused window (Streamline: \"window not focused\"); the test stays in the background, so generated frames are checked in play");
         }
         boolean before = Hooks.enabled;
         Hooks.toggle();
@@ -588,6 +717,15 @@ final class Test {
             if (traced != null) ImageIO.write(traced, "png", new File(dir, "traced.png"));
             if (afterBlock != null) ImageIO.write(afterBlock, "png", new File(dir, "traced-with-block.png"));
             if (colours != null) ImageIO.write(colours, "png", new File(dir, "colours-view.png"));
+            String[] uiNames = {"settings-main", "settings-effects", "settings-rtx", "settings-photo"};
+            for (int i = 0; i < uiPics.length; i++) if (uiPics[i] != null) ImageIO.write(uiPics[i], "png", new File(dir, uiNames[i] + ".png"));
+            for (int i = 0; i < SKY_PITCH.length; i++)
+                if (gameSky[i] != null && tracedSky[i] != null) {
+                    BufferedImage c = new BufferedImage(gameSky[i].getWidth(), gameSky[i].getHeight() * 2, BufferedImage.TYPE_INT_RGB);
+                    c.getGraphics().drawImage(gameSky[i], 0, 0, null);
+                    c.getGraphics().drawImage(tracedSky[i], 0, gameSky[i].getHeight(), null);
+                    ImageIO.write(c, "png", new File(dir, "sky" + Math.round(-SKY_PITCH[i]) + "-compare.png"));
+                }
             if (dlssPic != null) ImageIO.write(dlssPic, "png", new File(dir, "dlss.png"));
             if (rrPic != null) ImageIO.write(rrPic, "png", new File(dir, "rr.png"));
             for (Object[] e : extraPics) ImageIO.write((BufferedImage) e[1], "png", new File(dir, (String) e[0]));

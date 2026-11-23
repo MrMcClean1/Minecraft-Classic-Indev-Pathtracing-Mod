@@ -29,6 +29,12 @@ uniform vec2 uJitter;             // DLSS: this frame's sub-pixel nudge, pixels 
 uniform int uPointSample;         // DLSS: every sample through the jittered point (it adds frames up itself)
 uniform vec2 uDof;                // photo mode: lens radius and focus distance in blocks (radius 0: no depth of field)
 uniform float uMaxDist;           // traceDistance: how far camera rays look (blocks)
+// the sky the camera sees, as the game draws it (Tracer.readGameFog): its colours (display values 0..1), the linear fog
+// it set up this frame, its sky plane's height; and compose.comp's tone curve, run backwards to land on those colours
+uniform vec3 uGameSky, uGameFog, uGameCloud;
+uniform vec2 uGameFogRange;       // fog start, end (blocks)
+uniform float uSkyPlaneY, uExposure, uBrightness;
+uniform int uLook;                // compose.comp's Look: 0 Beta, 1 Traced, 2 Realistic
 bool primaryWater;                // the camera ray's first surface was water (Ray Reconstruction's guides)
 
 const uint AIR = 0u, CUBE = 1u, CUTOUT = 2u, CROSS = 3u, WATER = 4u, LAVA = 5u, SLAB = 6u, TORCH = 7u, LOW = 8u;
@@ -230,7 +236,7 @@ bool trace(vec3 ro, vec3 rd, float maxT, int mode, out Hit h) {
 
 // ---------------------------------------------------------------- sky, clouds, fog
 float cloudAt(vec2 xz) {
-    vec2 uv = (xz + vec2(uTime * 0.6, 0.0)) / (12.0 * vec2(textureSize(uClouds, 0)));
+    vec2 uv = (xz + vec2(uTime * 0.6, 0.0)) / 2048.0; // as the game: clouds.png over 2048 blocks, 0.6 blocks a second
     return texture(uClouds, uv).a; // clouds.png is white; the shape is in its alpha
 }
 vec3 sky(vec3 d) {
@@ -238,14 +244,31 @@ vec3 sky(vec3 d) {
     if (d.y < 0.0) c = uSkyHorizon * 0.8;
     return c;
 }
+// compose.comp backwards (the Look, exposure and brightness, ACES, gamma): the light that comes out as display colour s
+vec3 displayToLight(vec3 s) {
+    vec3 y = pow(clamp(s, vec3(0.0), vec3(0.995)), vec3(2.2));
+    // ACES: y = x(2.51x + 0.03) / (x(2.43x + 0.59) + 0.14), solved for x
+    vec3 a = 2.43 * y - 2.51, b = 0.59 * y - 0.03, c = 0.14 * y;
+    vec3 x = (-b - sqrt(max(b * b - 4.0 * a * c, vec3(0.0)))) / (2.0 * a);
+    x = max(x, vec3(0.0)) / max(uExposure * uBrightness, 1e-3);
+    if (uLook == 0) { // c * 0.8 + 0.35 * dot(c, 0.333) + 0.08
+        float m = (dot(x, vec3(1.0 / 3.0)) - 0.08) / (0.8 + 0.35 * 0.999);
+        x = (x - 0.35 * 0.999 * m - 0.08) / 0.8;
+    } else if (uLook == 2) x = pow(x, vec3(1.0 / 1.15));
+    return max(x, vec3(0.0));
+}
+float gameFog(float t) { return clamp((t - uGameFogRange.x) / max(uGameFogRange.y - uGameFogRange.x, 1.0), 0.0, 1.0); }
+
+// What a camera ray sees of the sky: the game's own sky plane, clouds and fog, in the game's colours (not the sky that
+// lights the world, sky() above), plus the sun's disc.
 vec3 skyView(vec3 ro, vec3 d) {
-    vec3 c = sky(d) + uSunColor * 6.0 * smoothstep(0.9990, 0.9996, dot(d, uSunDir));
-    if (fxOn(FX_CLOUDS) && d.y > 0.0 && ro.y < uCloudY) {
+    vec3 col = uGameFog;   // under the horizon and past the sky plane: the game's fog (its clear colour)
+    if (d.y > 1e-4 && ro.y < uSkyPlaneY) col = mix(uGameSky, uGameFog, gameFog((uSkyPlaneY - ro.y) / d.y));
+    if (fxOn(FX_CLOUDS) && d.y > 1e-4 && ro.y < uCloudY) {
         float t = (uCloudY - ro.y) / d.y;
-        float a = cloudAt((ro + d * t).xz) * clamp(1.0 - t / 600.0, 0.0, 1.0);
-        c = mix(c, uSunColor * 0.55 + sky(vec3(0, 1, 0)) * 0.35, a * 0.85);
+        col = mix(col, mix(uGameCloud, uGameFog, gameFog(t)), cloudAt((ro + d * t).xz));
     }
-    return c;
+    return displayToLight(col) + uSunColor * 6.0 * smoothstep(0.9990, 0.9996, dot(d, uSunDir));
 }
 float cloudShade(vec3 p) {
     if (!fxOn(FX_CLOUDS) || uCloudShadow <= 0.0 || uSunDir.y <= 0.05) return 1.0;
