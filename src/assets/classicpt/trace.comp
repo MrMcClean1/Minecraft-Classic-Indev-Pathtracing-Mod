@@ -183,17 +183,26 @@ bool voxel(ivec3 c, uint id, vec3 ro, vec3 rd, float tIn, float tOut, int mode, 
 // Around the map (Classic's and Indev's edge): a water plane, with ground under it, beyond the map's x/z edges.
 bool outside(vec3 ro, vec3 rd, float maxT, int mode, inout Hit h) {
     if (abs(rd.y) < 1e-5) return false;
+    bool hasWater = uWaterY > uGroundY;
     for (int k = 0; k < 2; k++) {
         float y = k == 0 ? uWaterY : uGroundY;
-        if (k == 0 && (mode != M_VIEW || uWaterY <= uGroundY)) continue;
+        if (k == 0 && (mode != M_VIEW || !hasWater)) continue;
         float t = (y - ro.y) / rd.y;
         if (t <= 1e-4 || t > maxT) continue;
         vec3 p = ro + rd * t;
         if (p.x >= 0.0 && p.z >= 0.0 && p.x <= float(uSize.x) && p.z <= float(uSize.z)) continue;
-        uint id = k == 0 ? 9u : 7u;
+        uint id = k == 0 ? 9u : (hasWater ? 7u : 2u); // inland Indev maps have grass outside, ocean maps have bedrock seabed
         h.t = t; h.n = vec3(0.0, rd.y < 0.0 ? 1.0 : -1.0, 0.0); h.id = id;
         if (k == 0 && fxOn(FX_WAVES)) h.n = waveNormal(p.xz);
-        h.col = tileTex(info[id * 8u + 2u], fract(p.xz));
+        uint tile = info[id * 8u + 2u];
+        vec4 c = tileTex(tile, fract(p.xz));
+        // Blend distant infinite border tiles toward a smooth 4-point average so they never shimmer into static
+        if (t > 24.0) {
+            vec4 avg = (tileTex(tile, vec2(0.25, 0.25)) + tileTex(tile, vec2(0.75, 0.25))
+                      + tileTex(tile, vec2(0.25, 0.75)) + tileTex(tile, vec2(0.75, 0.75))) * 0.25;
+            c = mix(c, avg, smoothstep(24.0, 96.0, t));
+        }
+        h.col = c;
         return true;
     }
     return false;
@@ -317,6 +326,7 @@ vec3 radiance(vec3 ro, vec3 rd, out vec3 albedo, out vec3 normal, out float dist
     int mode = isWater(blockAt(ivec3(floor(ro)))) ? M_UNDERWATER : M_VIEW;
     int bounces = 0;
     float travelled = 0.0;
+    bool hitOutside = false;
     for (int step = 0; step < 8 && bounces <= uBounces; step++) {
         Hit h;
         if (!trace(ro, rd, bounces == 0 ? uMaxDist : 600.0, mode, h)) {
@@ -324,14 +334,17 @@ vec3 radiance(vec3 ro, vec3 rd, out vec3 albedo, out vec3 normal, out float dist
             break;
         }
         vec3 p = ro + rd * h.t;
-        if (bounces == 0) travelled += h.t;
+        if (bounces == 0) {
+            travelled += h.t;
+            if (p.x < 0.0 || p.z < 0.0 || p.x > float(uSize.x) || p.z > float(uSize.z)) hitOutside = true;
+        }
         if (mode == M_UNDERWATER) T *= exp(-h.t * vec3(0.30, 0.09, 0.06));
         if (h.id == EXIT) { mode = M_VIEW; ro = p + rd * 1e-3; continue; }
         if (mode == M_VIEW && isWater(h.id)) {
             if (primary) { normal = h.n; dist = travelled; primary = false; primaryWater = true; } // water: no texture to take out
             float F = uReflect == 0 ? 0.0 : fresnel(0.02, dot(-rd, h.n));
             if (rnd() < F) { rd = reflect(rd, h.n); ro = p + h.n * 1e-3; }
-            else { mode = M_UNDERWATER; ro = p - h.n * 1e-3; rd = refract(rd, h.n, 1.0 / 1.33); if (dot(rd, rd) < 0.5) rd = reflect(rd, h.n); T *= h.col.rgb * 1.6; }
+            else { mode = M_UNDERWATER; ro = p - h.n * 1e-3; rd = refract(rd, h.n, 1.0 / 1.33); if (dot(rd, rd) < 0.5) rd = reflect(rd, h.n); T *= mix(vec3(1.0), min(h.col.rgb * 1.8, vec3(1.0)), 0.35); }
             continue;
         }
         vec3 alb = h.col.rgb;
@@ -372,6 +385,9 @@ vec3 radiance(vec3 ro, vec3 rd, out vec3 albedo, out vec3 normal, out float dist
     if (dist > 0.0 && uFogEnd > 0.0) { // Classic's linear fog, on the whole picture (compose multiplies the albedo back)
         float f = clamp((dist - uFogEnd * 0.25) / (uFogEnd * 0.75), 0.0, 1.0);
         L = mix(L, uFogColor / max(albedo, vec3(0.02)), f);
+    } else if (dist > 0.0 && hitOutside) { // fade the infinite plane outside the map into the game's horizon fog
+        float f = gameFog(dist);
+        if (f > 0.0) L = mix(L, displayToLight(uGameFog) / max(albedo, vec3(0.02)), f);
     }
     return min(L, vec3(48.0));
 }

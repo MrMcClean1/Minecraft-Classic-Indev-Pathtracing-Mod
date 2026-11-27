@@ -187,15 +187,17 @@ final class Game {
         throw new NoSuchMethodException("set level");
     }
 
-    private Field health;
+    private Field health, hurtTime;
 
-    /** The player back to full health (Classic's Mob.health, Indev's mob field W): a test's player can't die. */
+    /** The player back to full health and no hurt camera roll (Classic's Mob.health/hurtTime, Indev's W/Y). */
     void keepAlive() {
         Object p = player();
         if (p == null) return;
         try {
             if (health == null) health = field(p.getClass(), indev ? "W" : "health");
             if (health.getInt(p) < 20) health.setInt(p, 20);
+            if (hurtTime == null) hurtTime = field(p.getClass(), indev ? "Y" : "hurtTime");
+            if (hurtTime.getInt(p) != 0) hurtTime.setInt(p, 0);
         } catch (Exception ignored) {
         }
     }

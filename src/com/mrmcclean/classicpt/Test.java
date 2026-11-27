@@ -135,9 +135,13 @@ final class Test {
         }
     }
 
+    private static float[] homePos;
+
     static void beforeTrace(float a) {
         if (!running() || g.level() == null || g.player() == null) return;
         if (!placedOnTop) { placedOnTop = true; onTop(); } // the saved level may have left the player in a cave
+        if (homePos != null && (stage == 1 || stage == 2 || stage == 5 || stage == 70 || stage == 71))
+            g.setPos(homePos[0], homePos[1], homePos[2]); // hold the exact spot so mobs/gravity don't shift game vs traced
         if (towardSun) g.setView(137f - (g.indev ? 180f : 0f), -15f); // the god rays check: toward the sun (Indev's view turns by 180)
         else if (stage >= 50 && stage < 60) g.setView(135f, 89f); // the crack check: straight down at the block underfoot
         else if (stage == 70 || stage == 71) g.setView(135f, SKY_PITCH[skyI]); // the sky check: looking up
@@ -146,9 +150,6 @@ final class Test {
         switch (stage) {
             case 0: // let the game build its picture of the level
                 if (++wait > 300) { stage = 70; wait = 0; skyI = 0; Hooks.enabled = false; } // after the move to the surface, the game redraws its picture there
-                break;
-            case 1:
-                if (++wait > 30) { game = grab(); stage = 2; wait = 0; Hooks.enabled = true; Hooks.tracer.resetHistory(); }
                 break;
             default:
                 break;
@@ -159,6 +160,9 @@ final class Test {
         if (!running() || g.level() == null || g.player() == null) return;
         Tracer t = Hooks.tracer;
         switch (stage) {
+            case 1: // grab the game's full picture (sky, clouds, water, hand) from beforeHud, matching traced
+                if (++wait > 30) { game = grab(); stage = 2; wait = 0; Hooks.enabled = true; t.resetHistory(); }
+                break;
             case 70: // the sky check: the game's own sky at this pitch, then the traced one
                 if (++wait > 15) { gameSky[skyI] = grab(); Hooks.enabled = true; t.resetHistory(); stage = 71; wait = 0; }
                 break;
@@ -457,7 +461,7 @@ final class Test {
         if (b == null || nx <= 0) return;
         int x = nx / 2, z = nz / 2;
         for (int y = ny - 1; y >= 0; y--)
-            if (b[(y * nz + z) * nx + x] != 0) { g.setPos(x + 0.5f, y + 1 + 1.62f, z + 0.5f); note("player put on the surface at " + x + " " + (y + 1) + " " + z); return; }
+            if (b[(y * nz + z) * nx + x] != 0) { homePos = new float[]{x + 0.5f, y + 1 + 1.62f, z + 0.5f}; g.setPos(homePos[0], homePos[1], homePos[2]); note("player put on the surface at " + x + " " + (y + 1) + " " + z); return; }
     }
 
     // ---- the optional effects, FSR and start-on
