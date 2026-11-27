@@ -21,7 +21,7 @@ final class Game {
     final boolean indev;
     final Object mc;
     private final Field fLevel, fPlayer, fW, fH;
-    private Field lvX, lvY, lvZ, lvBlocks, lvWater;
+    private Field lvX, lvY, lvZ, lvBlocks, lvData, lvWater;
     private Field px, py, pz, pxo, pyo, pzo, pyaw, ppitch, pyawO, ppitchO;
     private Object level;
 
@@ -69,8 +69,8 @@ final class Game {
             Object l = fLevel.get(mc);
             if (l != level && l != null) {
                 Class<?> c = l.getClass();
-                if (indev) { lvX = field(c, "a"); lvZ = field(c, "b"); lvY = field(c, "c"); lvBlocks = field(c, "d"); lvWater = null; }
-                else { lvX = field(c, "width"); lvZ = field(c, "height"); lvY = field(c, "depth"); lvBlocks = field(c, "blocks"); lvWater = field(c, "waterLevel"); }
+                if (indev) { lvX = field(c, "a"); lvZ = field(c, "b"); lvY = field(c, "c"); lvBlocks = field(c, "d"); lvData = field(c, "e"); lvWater = null; }
+                else { lvX = field(c, "width"); lvZ = field(c, "height"); lvY = field(c, "depth"); lvBlocks = field(c, "blocks"); lvData = null; lvWater = field(c, "waterLevel"); }
             }
             level = l;
             return l;
@@ -83,6 +83,8 @@ final class Game {
     int sizeY() { try { return lvY.getInt(level); } catch (Exception e) { return 0; } }
     int sizeZ() { try { return lvZ.getInt(level); } catch (Exception e) { return 0; } }
     byte[] blocks() { try { return (byte[]) lvBlocks.get(level); } catch (Exception e) { return null; } }
+    /** Indev's block data array (upper 4 bits are block metadata, e.g. wall torch facing); null on Classic. */
+    byte[] data() { try { return lvData == null ? null : (byte[]) lvData.get(level); } catch (Exception e) { return null; } }
     /** Classic's water level around the map; Indev keeps it elsewhere, so -1 (the tracer looks at the map's edge). */
     int waterLevel() { try { return lvWater == null ? -1 : lvWater.getInt(level); } catch (Exception e) { return -1; } }
 

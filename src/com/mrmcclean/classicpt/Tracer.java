@@ -11,6 +11,7 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.nio.ShortBuffer;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
@@ -58,7 +59,8 @@ final class Tracer {
     private boolean historyValid;
     private float[] prevCam;            // last frame's camera: position, forward, right, up
     private final long start = System.nanoTime();
-    byte[] copy;                        // what the GPU has
+    byte[] copy;                        // what the GPU has (block ids)
+    byte[] copyMeta;                    // Indev block metadata (upper nibble of level.e), null on Classic
     private int sx, sy, sz, scanY;
     private Object levelSeen;
     private float waterY, groundY;
@@ -242,16 +244,23 @@ final class Tracer {
         sx = g.sizeX(); sy = g.sizeY(); sz = g.sizeZ();
         if (blocks == null || sx * sy * sz != blocks.length) return;
         copy = blocks.clone();
+        byte[] data = g.data();
+        copyMeta = data != null && data.length == copy.length ? new byte[copy.length] : null;
         if (worldTex != 0) GL11.glDeleteTextures(worldTex);
         worldTex = GL11.glGenTextures();
         GL11.glBindTexture(GL12.GL_TEXTURE_3D, worldTex);
         GL11.glTexParameteri(GL12.GL_TEXTURE_3D, GL11.GL_TEXTURE_MIN_FILTER, GL11.GL_NEAREST);
         GL11.glTexParameteri(GL12.GL_TEXTURE_3D, GL11.GL_TEXTURE_MAG_FILTER, GL11.GL_NEAREST);
-        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
-        ByteBuffer buf = BufferUtils.createByteBuffer(copy.length);
-        buf.put(copy).flip();
-        // the level's index is (y * zSize + z) * xSize + x, so the texture is x by z by y
-        GL12.glTexImage3D(GL12.GL_TEXTURE_3D, 0, GL30.GL_R8UI, sx, sz, sy, 0, GL30.GL_RED_INTEGER, GL11.GL_UNSIGNED_BYTE, buf);
+        GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 2);
+        ShortBuffer buf = BufferUtils.createShortBuffer(copy.length);
+        for (int i = 0; i < copy.length; i++) {
+            int m = copyMeta != null ? (data[i] >>> 4) & 15 : 0;
+            if (copyMeta != null) copyMeta[i] = (byte) m;
+            buf.put((short) ((copy[i] & 255) | (m << 8)));
+        }
+        buf.flip();
+        // the level's index is (y * zSize + z) * xSize + x, so the texture is x by z by y (low byte = id, high byte = meta)
+        GL12.glTexImage3D(GL12.GL_TEXTURE_3D, 0, GL30.GL_R16UI, sx, sz, sy, 0, GL30.GL_RED_INTEGER, GL11.GL_UNSIGNED_SHORT, buf);
         GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4);
         GL11.glBindTexture(GL12.GL_TEXTURE_3D, 0);
         levelSeen = level;
@@ -287,22 +296,31 @@ final class Tracer {
     private void scan() {
         byte[] blocks = g.blocks();
         if (blocks == null || blocks.length != copy.length) return;
+        byte[] data = g.data();
+        boolean hasMeta = copyMeta != null && data != null && data.length == copy.length;
         int layer = sx * sz, per = Math.max(1, Math.min(sy, (1 << 20) / layer));
-        ByteBuffer buf = null;
+        ShortBuffer buf = null;
         for (int k = 0; k < per; k++) {
             int y = scanY;
             scanY = (scanY + 1) % sy;
             int o = y * layer;
             boolean diff = false;
-            for (int i = o; i < o + layer; i++) if (blocks[i] != copy[i]) { diff = true; break; }
+            for (int i = o; i < o + layer; i++) {
+                if (blocks[i] != copy[i] || (hasMeta && (((data[i] >>> 4) & 15) != (copyMeta[i] & 15)))) { diff = true; break; }
+            }
             if (!diff) continue;
             System.arraycopy(blocks, o, copy, o, layer);
-            if (buf == null) buf = BufferUtils.createByteBuffer(layer);
+            if (buf == null) buf = BufferUtils.createShortBuffer(layer);
             buf.clear();
-            buf.put(copy, o, layer).flip();
+            for (int i = o; i < o + layer; i++) {
+                int m = hasMeta ? (data[i] >>> 4) & 15 : 0;
+                if (hasMeta) copyMeta[i] = (byte) m;
+                buf.put((short) ((copy[i] & 255) | (m << 8)));
+            }
+            buf.flip();
             GL11.glBindTexture(GL12.GL_TEXTURE_3D, worldTex);
-            GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 1);
-            GL12.glTexSubImage3D(GL12.GL_TEXTURE_3D, 0, 0, 0, y, sx, sz, 1, GL30.GL_RED_INTEGER, GL11.GL_UNSIGNED_BYTE, buf);
+            GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 2);
+            GL12.glTexSubImage3D(GL12.GL_TEXTURE_3D, 0, 0, 0, y, sx, sz, 1, GL30.GL_RED_INTEGER, GL11.GL_UNSIGNED_SHORT, buf);
             GL11.glPixelStorei(GL11.GL_UNPACK_ALIGNMENT, 4);
             GL11.glBindTexture(GL12.GL_TEXTURE_3D, 0);
             layersUploaded++;
@@ -317,15 +335,28 @@ final class Tracer {
         for (int y = Math.max(0, cy - 12); y < Math.min(sy, cy + 12); y++)
             for (int z = Math.max(0, cz - r); z < Math.min(sz, cz + r); z++)
                 for (int x = Math.max(0, cx - r); x < Math.min(sx, cx + r); x++) {
-                    int id = copy[(y * sz + z) * sx + x] & 255;
+                    int idx = (y * sz + z) * sx + x;
+                    int id = copy[idx] & 255;
                     int shape = id == 0 ? AIR : shapeOf(id, g.indev, faces[id] != null);
                     if (id == 50 || id == 51 || (shape == LAVA && (y + 1 >= sy || copy[((y + 1) * sz + z) * sx + x] == 0)))
-                        found.add(new int[]{x, y, z, id, (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz)});
+                        found.add(new int[]{x, y, z, id, (x - cx) * (x - cx) + (y - cy) * (y - cy) + (z - cz) * (z - cz), copyMeta != null ? copyMeta[idx] & 15 : 0});
                 }
         Collections.sort(found, new Comparator<int[]>() { public int compare(int[] a, int[] b) { return a[4] - b[4]; } });
         lightCount = Math.min(MAX_LIGHTS, found.size());
         FloatBuffer f = BufferUtils.createFloatBuffer(MAX_LIGHTS * 4);
-        for (int i = 0; i < lightCount; i++) { int[] l = found.get(i); f.put(l[0] + 0.5f).put(l[1] + 0.5f).put(l[2] + 0.5f).put(l[3]); }
+        for (int i = 0; i < lightCount; i++) {
+            int[] l = found.get(i);
+            float ox = 0.5f, oy = 0.5f, oz = 0.5f;
+            if (l[3] == 50) {
+                int m = l[5];
+                if (m == 1) { ox = 0.25f; oy = 0.82f; }
+                else if (m == 2) { ox = 0.75f; oy = 0.82f; }
+                else if (m == 3) { oz = 0.25f; oy = 0.82f; }
+                else if (m == 4) { oz = 0.75f; oy = 0.82f; }
+                else { oy = 0.65f; }
+            }
+            f.put(l[0] + ox).put(l[1] + oy).put(l[2] + oz).put(l[3]);
+        }
         while (f.hasRemaining()) f.put(0);
         f.flip();
         GL15.glBindBuffer(GL43.GL_SHADER_STORAGE_BUFFER, lightBuf);
