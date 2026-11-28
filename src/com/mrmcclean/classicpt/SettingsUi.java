@@ -93,7 +93,7 @@ public final class SettingsUi {
             l.add(button(new Label() { public String get() { return "Path tracer: " + (Hooks.enabled ? "ON" : "OFF"); } }, new Step() { public void by(int d) { Hooks.toggle(); } }));
             l.add(button(new Label() { public String get() { return "Preset: " + presetName(); } }, new Step() { public void by(int d) { st.applyPreset(Math.floorMod(st.preset + d, 3)); } }));
             l.add(button(new Label() { public String get() { return "Denoiser: " + Settings.DENOISERS[st.denoiser]; } }, new Step() { public void by(int d) { st.denoiser = Math.floorMod(st.denoiser + d, 3); } }));
-            l.add(button(new Label() { public String get() { return "Look: " + Settings.LOOKS[st.look]; } }, new Step() { public void by(int d) { st.look = Math.floorMod(st.look + d, 3); } }));
+            l.add(button(new Label() { public String get() { return "Look: " + Settings.LOOKS[st.look]; } }, new Step() { public void by(int d) { st.look = Math.floorMod(st.look + d, Settings.LOOKS.length); } }));
             l.add(button(new Label() { public String get() { return "Upscaler: " + (st.upscaler == Settings.UPSCALER_DLSS ? "NVIDIA DLSS" : st.upscaler == Settings.UPSCALER_FSR ? "AMD FSR 3.1" : "Basic"); } },
                     new Step() { public void by(int d) { int[] order = {Settings.UPSCALER_BASIC, Settings.UPSCALER_FSR, Settings.UPSCALER_DLSS}; int i = 0; for (int k = 0; k < 3; k++) if (order[k] == st.upscaler) i = k; st.upscaler = order[Math.floorMod(i + d, 3)]; } }));
             l.add(slider(new Label() { public String get() { return "Render scale: " + Math.round(st.renderScale * 100) + "%" + (st.upscaler == Settings.UPSCALER_DLSS ? " (" + dlssMode() + ")" : ""); } },
@@ -117,6 +117,7 @@ public final class SettingsUi {
             l.add(toggle("Waving plants", new Get() { public float get() { return st.waving ? 1 : 0; } }, new Set() { public void to(float v) { st.waving = v > 0; } }));
             l.add(toggle("Water waves", new Get() { public float get() { return st.waves ? 1 : 0; } }, new Set() { public void to(float v) { st.waves = v > 0; } }));
             l.add(toggle("Clouds", new Get() { public float get() { return st.clouds ? 1 : 0; } }, new Set() { public void to(float v) { st.clouds = v > 0; } }));
+            l.add(toggle("Cinematic shader", new Get() { public float get() { return st.cinematic ? 1 : 0; } }, new Set() { public void to(float v) { st.cinematic = v > 0; } }));
             l.add(slider(new Label() { public String get() { return "Cloud shadows: " + (st.cloudShadows <= 0 ? "OFF" : Math.round(st.cloudShadows * 100) + "%"); } },
                     0f, 1f, 0.05f, new Get() { public float get() { return st.cloudShadows; } }, new Set() { public void to(float v) { st.cloudShadows = v; } }));
             l.add(button(new Label() { public String get() { return "Reflect: " + (st.reflections ? "Water" : "OFF"); } }, new Step() { public void by(int d) { st.reflections = !st.reflections; } }));

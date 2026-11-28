@@ -21,11 +21,11 @@ import java.util.Properties;
 final class Settings {
     static final String[] PRESETS = {"Fast", "Standard", "Fancy"};
     static final String[] DENOISERS = {"OFF", "Standard", "Advanced"};
-    static final String[] LOOKS = {"Beta", "Traced", "Realistic"};
+    static final String[] LOOKS = {"Beta", "Traced", "Realistic", "Cinematic"};
     static final String[] VIEWS = {"Path traced", "Colours", "Normals", "Light"};
     static final int UPSCALER_BASIC = 0, UPSCALER_DLSS = 1, UPSCALER_FSR = 2;
     // trace.comp, the same bits as Alpha/Beta (pt_base.glsl) where they have them
-    static final int FX_SPARKLE = 4, FX_GODRAYS = 8, FX_WAVING = 16, FX_WAVES = 32, FX_CLOUDS = 64, FX_FASTLEAVES = 128;
+    static final int FX_SPARKLE = 4, FX_GODRAYS = 8, FX_WAVING = 16, FX_WAVES = 32, FX_CLOUDS = 64, FX_FASTLEAVES = 128, FX_CINEMATIC = 256;
 
     int preset = 1, denoiser = 2, look = 1, view = 0;
     int bounces = 2, samples = 2;
@@ -46,12 +46,14 @@ final class Settings {
     int timelapseFrames = 120, timelapseFps = 30;
     /** On when the game starts (`enabled`; on by default, as in the other versions: MrMcClean, 2026-11-22). */
     boolean startOn = true;
-    /** Optional effects, off by default here: sun shafts, snow and ice glinting in the sun, solid (Fast) leaves. */
-    boolean godRays = false, snowSparkle = false, fastLeaves = false;
+    /** Optional effects, off by default here: sun shafts, snow and ice glinting in the sun, solid (Fast) leaves, cinematic shaders. */
+    boolean godRays = false, snowSparkle = false, fastLeaves = false, cinematic = false;
+
+    boolean isCinematic() { return cinematic || look == 3; }
 
     int effects() {
         return (waving ? FX_WAVING : 0) | (waves ? FX_WAVES : 0) | (clouds ? FX_CLOUDS : 0) | (godRays ? FX_GODRAYS : 0)
-                | (snowSparkle ? FX_SPARKLE : 0) | (fastLeaves ? FX_FASTLEAVES : 0);
+                | (snowSparkle ? FX_SPARKLE : 0) | (fastLeaves ? FX_FASTLEAVES : 0) | (isCinematic() ? FX_CINEMATIC : 0);
     }
 
     /** The presets set samples, bounces and render scale, as in the other tracers. */
@@ -81,9 +83,9 @@ final class Settings {
         }
         if (p.getProperty("denoise") != null && !b(p, "denoise", true)) denoiser = 0;
         else if (p.getProperty("denoise") != null && denoiser == 0) denoiser = 2;
-        // look: the other tracers' look.realism 0..1 (0 Beta, 0.25 their default, 1 realistic), or the older 0-2
-        if (p.getProperty("look.realism") != null) { float r = f(p, "look.realism", 0.25f); look = r < 0.125f ? 0 : r < 0.625f ? 1 : 2; }
-        else look = i(p, "look", look);
+        // look: the other tracers' look.realism 0..1 (0 Beta, 0.25 their default, 1 realistic), or the older 0-3
+        if (p.getProperty("look") != null) look = Math.max(0, Math.min(LOOKS.length - 1, i(p, "look", look)));
+        else if (p.getProperty("look.realism") != null) { float r = f(p, "look.realism", 0.25f); look = r < 0.125f ? 0 : r < 0.625f ? 1 : 2; }
         bounces = i(p, "bounces", bounces); samples = i(p, "samples", samples);
         renderScale = f(p, "renderScale", renderScale); brightness = f(p, "brightness", brightness);
         cloudShadows = f(p, "cloudShadows", cloudShadows); fogDistance = f(p, "fogDistance", fogDistance);
@@ -110,6 +112,7 @@ final class Settings {
         startOn = b(p, "enabled", startOn);
         godRays = b(p, "fx.godRays", godRays);
         snowSparkle = b(p, "fx.snowSparkle", snowSparkle);
+        cinematic = b(p, "fx.cinematic", cinematic);
         if (p.getProperty("leaves") != null) fastLeaves = "fast".equalsIgnoreCase(p.getProperty("leaves").trim());
         renderScale = Math.max(0.25f, Math.min(1f, renderScale));
         if ("off".equalsIgnoreCase(up)) renderScale = 1f; // the others' "off": native size
@@ -121,6 +124,7 @@ final class Settings {
         Properties p = new Properties();
         p.setProperty("preset", "" + preset);
         p.setProperty("denoise", "" + (denoiser != 0)); p.setProperty("denoiser", denoiser == 1 ? "standard" : "advanced");
+        p.setProperty("look", "" + look);
         p.setProperty("look.realism", look == 0 ? "0.0" : look == 1 ? "0.25" : "1.0");
         p.setProperty("bounces", "" + bounces); p.setProperty("samples", "" + samples);
         p.setProperty("renderScale", "" + renderScale); p.setProperty("brightness", "" + brightness); p.setProperty("sharpen", "" + sharpen);
@@ -128,7 +132,7 @@ final class Settings {
         p.setProperty("reflections", reflections ? "1" : "0"); p.setProperty("fx.wavingPlants", "" + waving); p.setProperty("fx.waterWaves", "" + waves);
         p.setProperty("clouds", "" + clouds); p.setProperty("heldLights", heldLight ? "2" : "0");
         p.setProperty("upscaler", upscaler == UPSCALER_DLSS ? "dlss" : upscaler == UPSCALER_FSR ? "fsr" : "basic"); p.setProperty("lowLatency", "" + lowLatency);
-        p.setProperty("enabled", "" + startOn); p.setProperty("fx.godRays", "" + godRays); p.setProperty("fx.snowSparkle", "" + snowSparkle);
+        p.setProperty("enabled", "" + startOn); p.setProperty("fx.godRays", "" + godRays); p.setProperty("fx.snowSparkle", "" + snowSparkle); p.setProperty("fx.cinematic", "" + cinematic);
         p.setProperty("leaves", fastLeaves ? "fast" : "fancy");
         p.setProperty("rayReconstruction", "" + rayReconstruction); p.setProperty("frameGeneration", "" + frameGeneration);
         p.setProperty("photo.enabled", "" + photoEnabled); p.setProperty("photo.samples", "" + photoSamples); p.setProperty("photo.aperture", "" + photoAperture);

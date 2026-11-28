@@ -38,8 +38,8 @@ final class Tracer {
     final Settings settings = new Settings();
     boolean ok, failed;
     String status = "not started";
-    private int prog, progTemporal, progAtrous, progCompose, progInputs, progRrPrep, progTonemap, progRcas, worldTex, atlasTex, cloudsTex, infoBuf, lightBuf;
-    private int lightTex, albedoTex, outTex, sharpTex;
+    private int prog, progTemporal, progAtrous, progCompose, progBloom, progInputs, progRrPrep, progTonemap, progRcas, worldTex, atlasTex, cloudsTex, infoBuf, lightBuf;
+    private int lightTex, albedoTex, outTex, sharpTex, bloomA, bloomB, bloomW, bloomH;
     // NVIDIA: DLSS's depth and motion, Ray Reconstruction's inputs (render size) and its tone-mapped result (window size)
     private int depthTex, motionTex, rrHdr, rrDiffuse, rrNormal, rrSpecular, rrOut, rrOutW, rrOutH;
     private static final float NEAR = 0.05f;
@@ -95,6 +95,7 @@ final class Tracer {
             progTemporal = program("temporal");
             progAtrous = program("atrous");
             progCompose = program("compose");
+            progBloom = program("bloom");
             progInputs = program("dlss_inputs");
             progRrPrep = program("rr_prep");
             progTonemap = program("tonemap");
@@ -604,17 +605,22 @@ final class Tracer {
             src = dst;
         }
 
-        // 4. compose
+        // 4. compose (+ optional quarter-res HDR bloom in Cinematic mode)
+        boolean doBloom = st.isCinematic() && st.view == 0 && progBloom != 0;
+        if (doBloom) computeBloom(src, albedoTex, false, st.look, tw, th, 0.5f, st.brightness);
         GL20.glUseProgram(progCompose);
         GL20.glUniform2i(loc(progCompose, "uRes"), tw, th);
         GL20.glUniform1f(loc(progCompose, "uExposure"), 0.5f);
         GL20.glUniform1f(loc(progCompose, "uBrightness"), st.brightness);
         GL20.glUniform1i(loc(progCompose, "uLook"), st.view == 0 ? st.look : 1);
+        GL20.glUniform1i(loc(progCompose, "uCinematic"), doBloom ? 1 : 0);
+        if (doBloom) { GL13.glActiveTexture(GL13.GL_TEXTURE0); GL11.glBindTexture(GL11.GL_TEXTURE_2D, bloomA); }
         image(0, src, GL15.GL_READ_ONLY, GL30.GL_RGBA16F);
         image(1, albedoTex, GL15.GL_READ_ONLY, GL11.GL_RGBA8);
         image(2, outTex, GL15.GL_WRITE_ONLY, GL11.GL_RGBA8);
         GL43.glDispatchCompute(gx, gy, 1);
         GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT | GL42.GL_TEXTURE_UPDATE_BARRIER_BIT);
+        if (doBloom) { GL13.glActiveTexture(GL13.GL_TEXTURE0); GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); }
 
         int shown = outTex;
         fsrActive = false;
@@ -766,17 +772,66 @@ final class Tracer {
             rrOut = texture(w, h, GL11.GL_RGBA8, true);
             rrOutW = w; rrOutH = h;
         }
+        boolean doBloom = st.isCinematic() && progBloom != 0;
+        if (doBloom) computeBloom(t, 0, true, st.look, w, h, 0.5f, st.brightness);
         GL20.glUseProgram(progTonemap);
         GL20.glUniform2i(loc(progTonemap, "uRes"), w, h);
         GL20.glUniform1f(loc(progTonemap, "uExposure"), 0.5f);
         GL20.glUniform1f(loc(progTonemap, "uBrightness"), st.brightness);
+        GL20.glUniform1i(loc(progTonemap, "uCinematic"), doBloom ? 1 : 0);
         GL13.glActiveTexture(GL13.GL_TEXTURE0);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, t);
+        if (doBloom) { GL13.glActiveTexture(GL13.GL_TEXTURE1); GL11.glBindTexture(GL11.GL_TEXTURE_2D, bloomA); }
         image(0, rrOut, GL15.GL_WRITE_ONLY, GL11.GL_RGBA8);
         GL43.glDispatchCompute((w + 7) / 8, (h + 7) / 8, 1);
         GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT);
+        if (doBloom) { GL13.glActiveTexture(GL13.GL_TEXTURE1); GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); }
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
         GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
         return true;
+    }
+
+    /** Quarter-res separable HDR bloom for Cinematic mode (downsample + H blur + V blur -> bloomA). */
+    private void computeBloom(int srcTex, int albTex, boolean fromHdr, int look, int srcW, int srcH, float exposure, float brightness) {
+        int bw = Math.max(8, srcW / 4), bh = Math.max(8, srcH / 4);
+        if (bw != bloomW || bh != bloomH || bloomA == 0) {
+            if (bloomA != 0) { GL11.glDeleteTextures(bloomA); GL11.glDeleteTextures(bloomB); }
+            bloomA = texture(bw, bh, GL30.GL_RGBA16F, true);
+            bloomB = texture(bw, bh, GL30.GL_RGBA16F, true);
+            bloomW = bw; bloomH = bh;
+        }
+        int bx = (bw + 7) / 8, by = (bh + 7) / 8;
+        GL20.glUseProgram(progBloom);
+        GL20.glUniform2i(loc(progBloom, "uDstSize"), bw, bh);
+        GL20.glUniform1i(loc(progBloom, "uFromHdr"), fromHdr ? 1 : 0);
+        GL20.glUniform1i(loc(progBloom, "uLook"), look);
+        GL20.glUniform1f(loc(progBloom, "uExposure"), exposure);
+        GL20.glUniform1f(loc(progBloom, "uBrightness"), brightness);
+        // Pass 0: downsample + soft-knee bright pass
+        GL20.glUniform1i(loc(progBloom, "uMode"), 0);
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, srcTex);
+        if (!fromHdr) { GL13.glActiveTexture(GL13.GL_TEXTURE1); GL11.glBindTexture(GL11.GL_TEXTURE_2D, albTex); }
+        image(0, bloomA, GL15.GL_WRITE_ONLY, GL30.GL_RGBA16F);
+        GL43.glDispatchCompute(bx, by, 1);
+        GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT);
+        // Pass 1: horizontal blur
+        GL20.glUniform1i(loc(progBloom, "uMode"), 1);
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, bloomA);
+        image(0, bloomB, GL15.GL_WRITE_ONLY, GL30.GL_RGBA16F);
+        GL43.glDispatchCompute(bx, by, 1);
+        GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT);
+        // Pass 2: vertical blur
+        GL20.glUniform1i(loc(progBloom, "uMode"), 2);
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, bloomB);
+        image(0, bloomA, GL15.GL_WRITE_ONLY, GL30.GL_RGBA16F);
+        GL43.glDispatchCompute(bx, by, 1);
+        GL42.glMemoryBarrier(GL42.GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL42.GL_TEXTURE_FETCH_BARRIER_BIT);
+        if (!fromHdr) { GL13.glActiveTexture(GL13.GL_TEXTURE1); GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0); }
+        GL13.glActiveTexture(GL13.GL_TEXTURE0);
+        GL11.glBindTexture(GL11.GL_TEXTURE_2D, 0);
     }
 
     private static void camera(int p, float[] c, float tan, float aspect, int w, int h) {

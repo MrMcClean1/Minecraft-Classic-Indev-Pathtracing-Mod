@@ -42,9 +42,10 @@ void main() {
     vec4 a = imageLoad(uAlbedo, px);
     vec3 alb = a.rgb * a.rgb;
     bool water = a.a < 0.5;
-    vec3 c = imageLoad(uLight, px).rgb;
+    vec3 c = max(imageLoad(uLight, px).rgb, vec3(0.0));
     if (uLook == 0) c = c * 0.8 + 0.35 * dot(c, vec3(0.333)) + 0.08;
     else if (uLook == 2) c = pow(c, vec3(1.15));
+    else if (uLook == 3) c = pow(c, vec3(1.08));
     imageStore(outHdr, px, vec4(c * alb, 1.0));
     imageStore(outDiffuse, px, vec4(alb, 1.0));
     vec4 g = imageLoad(uGeom, px);

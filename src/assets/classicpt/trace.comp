@@ -40,7 +40,7 @@ bool primaryWater;                // the camera ray's first surface was water (R
 const uint AIR = 0u, CUBE = 1u, CUTOUT = 2u, CROSS = 3u, WATER = 4u, LAVA = 5u, SLAB = 6u, TORCH = 7u, LOW = 8u;
 const uint EXIT = 65535u;         // leaving water (underwater rays)
 const int M_VIEW = 0, M_SHADOW = 1, M_UNDERWATER = 2;
-const int FX_SPARKLE = 4, FX_GODRAYS = 8, FX_WAVING = 16, FX_WAVES = 32, FX_CLOUDS = 64, FX_FASTLEAVES = 128; // the same bits as the Alpha/Beta tracers (FASTLEAVES: here only)
+const int FX_SPARKLE = 4, FX_GODRAYS = 8, FX_WAVING = 16, FX_WAVES = 32, FX_CLOUDS = 64, FX_FASTLEAVES = 128, FX_CINEMATIC = 256; // the same bits as the Alpha/Beta tracers (FASTLEAVES: here only)
 const int VIEW_PATH = 0, VIEW_ALBEDO = 1, VIEW_NORMALS = 2, VIEW_LIGHT = 3;
 bool fxOn(int bit) { return (uEffects & bit) != 0; }
 
@@ -73,12 +73,47 @@ vec2 swayUV(uint id, ivec3 cell, float height) {
     float amp = 0.6 * (id == 18u ? 0.03 : 0.07 * clamp(height, 0.0, 1.0));
     return vec2(s * amp, id == 18u ? cos(uTime * 1.2 + ph) * amp * 0.6 : 0.0);
 }
+float hash21(vec2 c) { return float(pcg(uint(int(c.x)) * 1597334677u ^ uint(int(c.y)) * 3812015801u)) * (1.0 / 4294967296.0); }
+float valueNoise(vec2 x) {
+    vec2 i = floor(x), f = fract(x);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash21(i), hash21(i + vec2(1, 0)), u.x), mix(hash21(i + vec2(0, 1)), hash21(i + vec2(1, 1)), u.x), u.y);
+}
+float cloudFbm(vec2 p) {
+    float v = valueNoise(p) * 0.56;
+    p = mat2(0.80, -0.60, 0.60, 0.80) * p * 2.08 + vec2(13.7, 29.1);
+    v += valueNoise(p) * 0.29;
+    p = mat2(0.80, -0.60, 0.60, 0.80) * p * 2.15 + vec2(7.3, 19.4);
+    v += valueNoise(p) * 0.15;
+    return v;
+}
+float cloudDensity(vec3 wp, float y0, float y1) {
+    float h = (wp.y - y0) / max(y1 - y0, 1.0);
+    if (h <= 0.0 || h >= 1.0) return 0.0;
+    vec2 p = (wp.xz + vec2(uTime * 1.4, uTime * 0.35)) * 0.0052;
+    float base = cloudFbm(p + vec2(h * 0.14, -h * 0.08));
+    float profile = smoothstep(0.0, 0.22, h) * smoothstep(1.0, 0.32, h);
+    return smoothstep(0.50, 0.76, base * (0.72 + 0.48 * profile)) * profile;
+}
+float waterCaustics(vec2 xz) {
+    vec2 p = xz * 1.35 + vec2(uTime * 0.42, uTime * 0.27);
+    vec2 q = mat2(0.75, -0.66, 0.66, 0.75) * xz * 1.65 - vec2(uTime * 0.31, -uTime * 0.46);
+    float a = abs(sin(p.x + sin(p.y * 1.3 + uTime * 0.6)) * cos(p.y + cos(p.x * 1.1 - uTime * 0.5)));
+    float b = abs(sin(q.x + cos(q.y * 1.2 - uTime * 0.7)) * cos(q.y + sin(q.x * 1.4 + uTime * 0.4)));
+    return clamp(pow(1.0 - min(a, b), 3.0), 0.0, 1.0);
+}
 vec3 waveNormal(vec2 xz) {
     vec2 g = vec2(0.0);
     const vec2 D0 = vec2(0.8, 0.6), D1 = vec2(-0.5, 0.86), D2 = vec2(0.2, -0.98);
     g += D0 * 0.045 * cos(dot(D0, xz) * 1.9 + uTime * 1.5);
     g += D1 * 0.035 * cos(dot(D1, xz) * 3.1 + uTime * 2.2);
     g += D2 * 0.020 * cos(dot(D2, xz) * 5.3 + uTime * 3.1);
+    if (fxOn(FX_CINEMATIC)) {
+        const vec2 D3 = vec2(-0.92, -0.39), D4 = vec2(0.45, -0.89);
+        g += D3 * 0.018 * cos(dot(D3, xz) * 9.4 + uTime * 4.3);
+        g += D4 * 0.014 * cos(dot(D4, xz) * 15.1 + uTime * 5.6);
+        g *= 1.15;
+    }
     g *= 0.7;
     return normalize(vec3(-g.x, 1.0, -g.y));
 }
@@ -274,7 +309,59 @@ float cloudAt(vec2 xz) {
     vec2 uv = (xz + vec2(uTime * 0.6, 0.0)) / 2048.0; // as the game: clouds.png over 2048 blocks, 0.6 blocks a second
     return texture(uClouds, uv).a; // clouds.png is white; the shape is in its alpha
 }
+vec3 cinematicSkyBase(vec3 d) {
+    float up = clamp(d.y, 0.0, 1.0);
+    vec3 zenith = vec3(0.065, 0.215, 0.58);
+    vec3 horizon = vec3(0.50, 0.68, 0.88);
+    float hFade = pow(1.0 - up, 3.2);
+    vec3 col = mix(zenith, horizon, hFade);
+    float ds = max(dot(d, uSunDir), 0.0);
+    col += vec3(1.0, 0.94, 0.84) * (pow(ds, 6.0) * 0.26 + pow(ds, 48.0) * 0.52) * (0.45 + 0.55 * hFade);
+    if (d.y < 0.0) col = mix(col, horizon, clamp(-d.y * 4.0, 0.0, 1.0));
+    return col;
+}
+void volumetricClouds(vec3 ro, vec3 d, inout vec3 skyCol) {
+    if (!fxOn(FX_CLOUDS) || d.y < 0.015) return;
+    float y0 = max(uCloudY + 18.0, 96.0);
+    float y1 = y0 + 40.0;
+    float t0 = (y0 - ro.y) / d.y;
+    float t1 = (y1 - ro.y) / d.y;
+    if (t1 < 0.0) return;
+    t0 = max(t0, 0.0);
+    if (t0 > 1800.0) return;
+    t1 = min(t1, t0 + 380.0);
+    const int STEPS = 7;
+    float dt = (t1 - t0) / float(STEPS);
+    float t = t0 + dt * rnd();
+    float cosT = dot(d, uSunDir);
+    const float g = 0.62;
+    float hg = (1.0 - g * g) / (12.5663706 * pow(1.0 + g * g - 2.0 * g * cosT, 1.5));
+    float phase = mix(0.28, 1.0, clamp(hg * 0.85, 0.0, 2.2));
+    vec3 sunCol = vec3(1.15, 1.10, 1.02);
+    vec3 ambTop = vec3(0.55, 0.66, 0.82), ambBot = vec3(0.24, 0.30, 0.38);
+    vec3 accum = vec3(0.0);
+    float trans = 1.0;
+    for (int i = 0; i < STEPS; i++) {
+        vec3 pos = ro + d * t;
+        float den = cloudDensity(pos, y0, y1);
+        if (den > 0.004) {
+            float hFrac = clamp((pos.y - y0) / (y1 - y0), 0.0, 1.0);
+            float denSun = cloudDensity(pos + uSunDir * 14.0, y0, y1) + 0.5 * cloudDensity(pos + uSunDir * 28.0, y0, y1);
+            float beer = exp(-denSun * 2.5);
+            float powder = 1.0 - 0.65 * exp(-den * 4.5);
+            vec3 sampleCol = sunCol * (beer * powder * (0.45 + 0.95 * phase)) + mix(ambBot, ambTop, smoothstep(0.0, 0.85, hFrac));
+            float alpha = 1.0 - exp(-den * dt * 0.048);
+            accum += trans * sampleCol * alpha;
+            trans *= 1.0 - alpha;
+            if (trans < 0.03) break;
+        }
+        t += dt;
+    }
+    float cloudAlpha = (1.0 - trans) * exp(-t0 / 1300.0);
+    if (cloudAlpha > 1e-4) skyCol = mix(skyCol, accum / max(1.0 - trans, 1e-4), cloudAlpha);
+}
 vec3 sky(vec3 d) {
+    if (fxOn(FX_CINEMATIC)) return cinematicSkyBase(d) * 1.9;
     vec3 c = mix(uSkyHorizon, uSkyTop, pow(clamp(d.y, 0.0, 1.0), 0.6));
     if (d.y < 0.0) c = uSkyHorizon * 0.8;
     return c;
@@ -290,13 +377,24 @@ vec3 displayToLight(vec3 s) {
         float m = (dot(x, vec3(1.0 / 3.0)) - 0.08) / (0.8 + 0.35 * 0.999);
         x = (x - 0.35 * 0.999 * m - 0.08) / 0.8;
     } else if (uLook == 2) x = pow(x, vec3(1.0 / 1.15));
+    else if (uLook == 3) x = pow(x, vec3(1.0 / 1.08));
     return max(x, vec3(0.0));
 }
 float gameFog(float t) { return clamp((t - uGameFogRange.x) / max(uGameFogRange.y - uGameFogRange.x, 1.0), 0.0, 1.0); }
 
-// What a camera ray sees of the sky: the game's own sky plane, clouds and fog, in the game's colours (not the sky that
-// lights the world, sky() above), plus the sun's disc.
+// What a camera ray sees of the sky: the game's own sky plane, clouds and fog, or physical sky + volumetric clouds in Cinematic mode.
 vec3 skyView(vec3 ro, vec3 d) {
+    if (fxOn(FX_CINEMATIC)) {
+        vec3 col = cinematicSkyBase(d);
+        float ds = dot(d, uSunDir);
+        if (ds > 0.0) {
+            float disc = smoothstep(0.9988, 0.9996, ds);
+            float glare = pow(ds, 180.0) * 1.4 + pow(ds, 24.0) * 0.25;
+            col += vec3(1.0, 0.96, 0.88) * (disc * 7.0 + glare);
+        }
+        volumetricClouds(ro, d, col);
+        return col / max(uExposure, 0.25);
+    }
     vec3 col = uGameFog;   // under the horizon and past the sky plane: the game's fog (its clear colour)
     if (d.y > 1e-4 && ro.y < uSkyPlaneY) col = mix(uGameSky, uGameFog, gameFog((uSkyPlaneY - ro.y) / d.y));
     if (fxOn(FX_CLOUDS) && d.y > 1e-4 && ro.y < uCloudY) {
@@ -307,6 +405,12 @@ vec3 skyView(vec3 ro, vec3 d) {
 }
 float cloudShade(vec3 p) {
     if (!fxOn(FX_CLOUDS) || uCloudShadow <= 0.0 || uSunDir.y <= 0.05) return 1.0;
+    if (fxOn(FX_CINEMATIC)) {
+        float y0 = max(uCloudY + 18.0, 96.0), yMid = y0 + 14.0;
+        if (p.y >= yMid) return 1.0;
+        vec3 c = p + uSunDir * ((yMid - p.y) / uSunDir.y);
+        return 1.0 - uCloudShadow * clamp(cloudDensity(c, y0, y0 + 40.0) * 1.5, 0.0, 1.0);
+    }
     float t = (uCloudY - p.y) / uSunDir.y;
     return 1.0 - uCloudShadow * cloudAt((p + uSunDir * t).xz);
 }
@@ -351,8 +455,9 @@ vec3 radiance(vec3 ro, vec3 rd, out vec3 albedo, out vec3 normal, out float dist
     bool primary = true;   // still looking for the first surface (the one the texture colour is taken out of)
     int mode = isWater(blockAt(ivec3(floor(ro)))) ? M_UNDERWATER : M_VIEW;
     int bounces = 0;
-    float travelled = 0.0;
+    float travelled = 0.0, primaryHitY = 64.0;
     bool hitOutside = false;
+    vec3 primDir = rd;
     for (int step = 0; step < 8 && bounces <= uBounces; step++) {
         Hit h;
         if (!trace(ro, rd, bounces == 0 ? uMaxDist : 600.0, mode, h)) {
@@ -362,26 +467,39 @@ vec3 radiance(vec3 ro, vec3 rd, out vec3 albedo, out vec3 normal, out float dist
         vec3 p = ro + rd * h.t;
         if (bounces == 0) {
             travelled += h.t;
+            primaryHitY = p.y;
             if (p.x < 0.0 || p.z < 0.0 || p.x > float(uSize.x) || p.z > float(uSize.z)) hitOutside = true;
         }
-        if (mode == M_UNDERWATER) T *= exp(-h.t * vec3(0.30, 0.09, 0.06));
+        if (mode == M_UNDERWATER) T *= exp(-h.t * (fxOn(FX_CINEMATIC) ? vec3(0.32, 0.11, 0.075) : vec3(0.30, 0.09, 0.06)));
         if (h.id == EXIT) { mode = M_VIEW; ro = p + rd * 1e-3; continue; }
         if (mode == M_VIEW && isWater(h.id)) {
             if (primary) { normal = h.n; dist = travelled; primary = false; primaryWater = true; } // water: no texture to take out
-            float F = uReflect == 0 ? 0.0 : fresnel(0.02, dot(-rd, h.n));
-            if (rnd() < F) { rd = reflect(rd, h.n); ro = p + h.n * 1e-3; }
-            else { mode = M_UNDERWATER; ro = p - h.n * 1e-3; rd = refract(rd, h.n, 1.0 / 1.33); if (dot(rd, rd) < 0.5) rd = reflect(rd, h.n); T *= mix(vec3(1.0), min(h.col.rgb * 1.8, vec3(1.0)), 0.35); }
+            float f0 = fxOn(FX_CINEMATIC) ? 0.035 : 0.02;
+            float F = uReflect == 0 ? 0.0 : fresnel(f0, dot(-rd, h.n));
+            if (rnd() < F) {
+                if (fxOn(FX_CINEMATIC)) {
+                    vec3 hv = normalize(uSunDir - rd);
+                    L += T * uSunColor * pow(max(dot(h.n, hv), 0.0), 200.0) * 3.0;
+                }
+                rd = reflect(rd, h.n); ro = p + h.n * 1e-3;
+            } else {
+                mode = M_UNDERWATER; ro = p - h.n * 1e-3; rd = refract(rd, h.n, 1.0 / 1.33);
+                if (dot(rd, rd) < 0.5) rd = reflect(rd, h.n);
+                vec3 wTint = fxOn(FX_CINEMATIC) ? vec3(0.30, 0.58, 0.65) : min(h.col.rgb * 1.8, vec3(1.0));
+                T *= mix(vec3(1.0), wTint, fxOn(FX_CINEMATIC) ? 0.42 : 0.35);
+            }
             continue;
         }
         vec3 alb = h.col.rgb;
         float glow = (h.id == 50u || h.id == 51u) ? smoothstep(0.27, 0.70, max(alb.r, max(alb.g, alb.b))) : 1.0;
+        float cinEmit = fxOn(FX_CINEMATIC) ? 1.85 : 1.0;
         if (primary) {
             primary = false;
             // the light is stored without this surface's colour (compose.comp multiplies it back), so the
             // throughput from here on leaves it out: what is in T so far (underwater tint) goes into the albedo
             albedo = T * alb; normal = h.n; dist = travelled;
             T = vec3(1.0);
-            vec3 e = emission(h.id) * glow;
+            vec3 e = emission(h.id) * glow * cinEmit;
             if (e.x > 0.0) { L += e; if (shapeOf(h.id) == LAVA) break; }
         } else {
             vec3 e = emission(h.id) * glow;
@@ -389,18 +507,33 @@ vec3 radiance(vec3 ro, vec3 rd, out vec3 albedo, out vec3 normal, out float dist
             T *= alb;
         }
         float nd = dot(h.n, uSunDir);
-        if (nd > 0.0) {
+        bool isFoliage = h.id == 18u || shapeOf(h.id) == CROSS;
+        if (nd > 0.0 || (fxOn(FX_CINEMATIC) && isFoliage && bounces == 0)) {
             Hit s;
             if (!trace(p + h.n * 1e-3, uSunDir, 600.0, M_SHADOW, s)) {
-                L += T * uSunColor * nd * cloudShade(p);
-                // snow sparkle (fx.snowSparkle): a few texels of snow and ice, each its own slightly tilted mirror
-                if (bounces == 0 && fxOn(FX_SPARKLE) && (h.id == 78u || h.id == 79u || h.id == 80u) && h.n.y > 0.5) {
-                    ivec3 sc = ivec3(floor(p * 16.0));
-                    uint hs = pcg(uint(sc.x) * 73856093u ^ uint(sc.y) * 19349663u ^ uint(sc.z) * 83492791u);
-                    if ((hs & 255u) < 16u) {
-                        vec3 jn = normalize(h.n + vec3(float((hs >> 8) & 255u) / 127.5 - 1.0, 0.0, float((hs >> 16) & 255u) / 127.5 - 1.0) * 0.45);
-                        L += T * uSunColor * pow(max(dot(reflect(rd, jn), uSunDir), 0.0), 150.0) * 4.0;
+                float cs = cloudShade(p);
+                if (nd > 0.0) {
+                    float caust = (fxOn(FX_CINEMATIC) && mode == M_UNDERWATER) ? (0.72 + 0.95 * waterCaustics(p.xz - uSunDir.xz * 0.4)) : 1.0;
+                    L += T * uSunColor * nd * cs * caust;
+                    // Subtle direct sun specular sheen on solid blocks in Cinematic mode
+                    if (fxOn(FX_CINEMATIC) && bounces == 0 && !isFoliage && shapeOf(h.id) != LAVA) {
+                        vec3 hv = normalize(uSunDir - rd);
+                        L += T * uSunColor * pow(max(dot(h.n, hv), 0.0), 36.0) * 0.09 * cs;
                     }
+                    // snow sparkle (fx.snowSparkle): a few texels of snow and ice, each its own slightly tilted mirror
+                    if (bounces == 0 && fxOn(FX_SPARKLE) && (h.id == 78u || h.id == 79u || h.id == 80u) && h.n.y > 0.5) {
+                        ivec3 sc = ivec3(floor(p * 16.0));
+                        uint hs = pcg(uint(sc.x) * 73856093u ^ uint(sc.y) * 19349663u ^ uint(sc.z) * 83492791u);
+                        if ((hs & 255u) < 16u) {
+                            vec3 jn = normalize(h.n + vec3(float((hs >> 8) & 255u) / 127.5 - 1.0, 0.0, float((hs >> 16) & 255u) / 127.5 - 1.0) * 0.45);
+                            L += T * uSunColor * pow(max(dot(reflect(rd, jn), uSunDir), 0.0), 150.0) * 4.0;
+                        }
+                    }
+                }
+                if (fxOn(FX_CINEMATIC) && isFoliage && bounces == 0) {
+                    // Backlit leaf & grass subsurface translucency
+                    float back = pow(max(dot(rd, uSunDir), 0.0), 3.0) * 0.40 + max(0.0, -nd) * 0.16;
+                    L += T * uSunColor * vec3(0.88, 1.08, 0.48) * back * cs;
                 }
             }
         }
@@ -409,7 +542,16 @@ vec3 radiance(vec3 ro, vec3 rd, out vec3 albedo, out vec3 normal, out float dist
         ro = p + h.n * 1e-3;
         bounces++;
     }
-    if (dist > 0.0 && uFogEnd > 0.0) { // Classic's linear fog, on the whole picture (compose multiplies the albedo back)
+    if (dist > 0.0 && fxOn(FX_CINEMATIC)) {
+        // Height-based valley mist & aerial perspective veiling distant terrain and map edges
+        float valley = exp(-max(primaryHitY - (uWaterY > -100.0 ? uWaterY : 32.0), 0.0) / 34.0);
+        float mist = (1.0 - exp(-dist * (0.0036 + 0.0048 * valley))) * 0.78;
+        if (uFogEnd > 0.0) mist = max(mist, clamp((dist - uFogEnd * 0.25) / (uFogEnd * 0.75), 0.0, 1.0));
+        if (hitOutside) mist = max(mist, gameFog(dist));
+        vec3 mistCol = cinematicSkyBase(normalize(vec3(primDir.x, max(primDir.y, 0.03), primDir.z)));
+        mistCol += vec3(1.0, 0.94, 0.82) * pow(max(dot(primDir, uSunDir), 0.0), 6.0) * 0.22;
+        L = mix(L, (mistCol / max(uExposure, 0.25)) / max(albedo, vec3(0.02)), clamp(mist, 0.0, 1.0));
+    } else if (dist > 0.0 && uFogEnd > 0.0) { // Classic's linear fog, on the whole picture (compose multiplies the albedo back)
         float f = clamp((dist - uFogEnd * 0.25) / (uFogEnd * 0.75), 0.0, 1.0);
         L = mix(L, uFogColor / max(albedo, vec3(0.02)), f);
     } else if (dist > 0.0 && hitOutside) { // fade the infinite plane outside the map into the game's horizon fog

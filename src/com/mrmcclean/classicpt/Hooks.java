@@ -171,7 +171,7 @@ public final class Hooks {
             case 0: toggle(); return;
             case 1: s.applyPreset((s.preset + 1) % 3); say("Path tracer preset: " + Settings.PRESETS[s.preset]); break;
             case 2: s.denoiser = (s.denoiser + 1) % 3; say("Path tracer denoiser: " + Settings.DENOISERS[s.denoiser]); break;
-            case 3: s.look = (s.look + 1) % 3; say("Path tracer look: " + Settings.LOOKS[s.look]); break;
+            case 3: s.look = (s.look + 1) % Settings.LOOKS.length; say("Path tracer look: " + Settings.LOOKS[s.look]); break;
             case 4:
                 if (!s.photoEnabled) say("Photo mode is off: photo.enabled=true in classicpt.properties");
                 else if (enabled) tracer.startPhoto(); else say("Photo mode needs the path tracer on (F7)");
