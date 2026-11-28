@@ -91,9 +91,11 @@ public final class SettingsUi {
         List<Item> l = new ArrayList<Item>();
         if (page == MAIN) {
             l.add(button(new Label() { public String get() { return "Path tracer: " + (Hooks.enabled ? "ON" : "OFF"); } }, new Step() { public void by(int d) { Hooks.toggle(); } }));
-            l.add(button(new Label() { public String get() { return "Preset: " + presetName(); } }, new Step() { public void by(int d) { st.applyPreset(Math.floorMod(st.preset + d, 3)); } }));
+            l.add(button(new Label() { public String get() { int sp = st.stylePreset(Hooks.enabled); return "Style: " + (sp < 0 ? "Custom" : Settings.STYLES[sp]); } },
+                    new Step() { public void by(int d) { int sp = st.stylePreset(Hooks.enabled); st.applyStyle(sp < 0 ? 2 : Math.floorMod(sp + d, Settings.STYLES.length)); } }));
+            l.add(button(new Label() { public String get() { return "Quality: " + presetName(); } }, new Step() { public void by(int d) { st.applyPreset(Math.floorMod(st.preset + d, 3)); } }));
             l.add(button(new Label() { public String get() { return "Denoiser: " + Settings.DENOISERS[st.denoiser]; } }, new Step() { public void by(int d) { st.denoiser = Math.floorMod(st.denoiser + d, 3); } }));
-            l.add(button(new Label() { public String get() { return "Look: " + Settings.LOOKS[st.look]; } }, new Step() { public void by(int d) { st.look = Math.floorMod(st.look + d, Settings.LOOKS.length); } }));
+            l.add(button(new Label() { public String get() { return "Look: " + Settings.LOOKS[st.look]; } }, new Step() { public void by(int d) { st.look = Math.floorMod(st.look + d, Settings.LOOKS.length); st.cinematic = st.look == 3; } }));
             l.add(button(new Label() { public String get() { return "Upscaler: " + (st.upscaler == Settings.UPSCALER_DLSS ? "NVIDIA DLSS" : st.upscaler == Settings.UPSCALER_FSR ? "AMD FSR 3.1" : "Basic"); } },
                     new Step() { public void by(int d) { int[] order = {Settings.UPSCALER_BASIC, Settings.UPSCALER_FSR, Settings.UPSCALER_DLSS}; int i = 0; for (int k = 0; k < 3; k++) if (order[k] == st.upscaler) i = k; st.upscaler = order[Math.floorMod(i + d, 3)]; } }));
             l.add(slider(new Label() { public String get() { return "Render scale: " + Math.round(st.renderScale * 100) + "%" + (st.upscaler == Settings.UPSCALER_DLSS ? " (" + dlssMode() + ")" : ""); } },

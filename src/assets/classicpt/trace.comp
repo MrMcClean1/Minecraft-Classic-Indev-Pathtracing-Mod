@@ -109,10 +109,9 @@ vec3 waveNormal(vec2 xz) {
     g += D1 * 0.035 * cos(dot(D1, xz) * 3.1 + uTime * 2.2);
     g += D2 * 0.020 * cos(dot(D2, xz) * 5.3 + uTime * 3.1);
     if (fxOn(FX_CINEMATIC)) {
-        const vec2 D3 = vec2(-0.92, -0.39), D4 = vec2(0.45, -0.89);
-        g += D3 * 0.018 * cos(dot(D3, xz) * 9.4 + uTime * 4.3);
-        g += D4 * 0.014 * cos(dot(D4, xz) * 15.1 + uTime * 5.6);
-        g *= 1.15;
+        const vec2 D3 = vec2(-0.92, -0.39);
+        g += D3 * 0.012 * cos(dot(D3, xz) * 7.6 + uTime * 3.8);
+        g *= 0.85;
     }
     g *= 0.7;
     return normalize(vec3(-g.x, 1.0, -g.y));
@@ -330,9 +329,10 @@ void volumetricClouds(vec3 ro, vec3 d, inout vec3 skyCol) {
     t0 = max(t0, 0.0);
     if (t0 > 1800.0) return;
     t1 = min(t1, t0 + 380.0);
-    const int STEPS = 7;
+    const int STEPS = 10;
     float dt = (t1 - t0) / float(STEPS);
-    float t = t0 + dt * rnd();
+    // Deterministic midpoint march: sky pixels bypass temporal accumulation, so never use per-frame rnd()
+    float t = t0 + dt * 0.5;
     float cosT = dot(d, uSunDir);
     const float g = 0.62;
     float hg = (1.0 - g * g) / (12.5663706 * pow(1.0 + g * g - 2.0 * g * cosT, 1.5));
@@ -479,7 +479,7 @@ vec3 radiance(vec3 ro, vec3 rd, out vec3 albedo, out vec3 normal, out float dist
             if (rnd() < F) {
                 if (fxOn(FX_CINEMATIC)) {
                     vec3 hv = normalize(uSunDir - rd);
-                    L += T * uSunColor * pow(max(dot(h.n, hv), 0.0), 200.0) * 3.0;
+                    L += T * uSunColor * pow(max(dot(h.n, hv), 0.0), 90.0) * 1.6;
                 }
                 rd = reflect(rd, h.n); ro = p + h.n * 1e-3;
             } else {
@@ -591,9 +591,10 @@ void main() {
         vec3 godL = vec3(0.0);
         if (fxOn(FX_GODRAYS) && uSunDir.y > 0.02 && !isWater(blockAt(ivec3(floor(ro))))) {
             float gEnd = min(d > 0.0 ? d : 600.0, 40.0), vis = 0.0;
+            float gj = d > 0.0 ? rnd() : fract(52.9829189 * fract(dot(vec2(px), vec2(0.06711056, 0.00583715))));
             for (int k = 0; k < 2; k++) {
                 Hit gs;
-                if (!trace(ro + rd * (gEnd * (float(k) + rnd()) / 2.0), uSunDir, 600.0, M_SHADOW, gs)) vis += 0.5;
+                if (!trace(ro + rd * (gEnd * (float(k) + gj) / 2.0), uSunDir, 600.0, M_SHADOW, gs)) vis += 0.5;
             }
             float cs = dot(rd, uSunDir);
             const float g = 0.6;

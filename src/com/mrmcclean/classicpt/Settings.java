@@ -20,6 +20,7 @@ import java.util.Properties;
  */
 final class Settings {
     static final String[] PRESETS = {"Fast", "Standard", "Fancy"};
+    static final String[] STYLES = {"Off", "Beta", "Faithful", "Realistic", "Cinematic"};
     static final String[] DENOISERS = {"OFF", "Standard", "Advanced"};
     static final String[] LOOKS = {"Beta", "Traced", "Realistic", "Cinematic"};
     static final String[] VIEWS = {"Path traced", "Colours", "Normals", "Light"};
@@ -62,6 +63,25 @@ final class Settings {
         if (p == 0) { samples = 1; bounces = 1; renderScale = 0.5f; }
         else if (p == 1) { samples = 2; bounces = 2; renderScale = 1f; }
         else { samples = 4; bounces = 3; renderScale = 1f; }
+    }
+
+    /** Style preset (F4, matching Alpha/Beta/Tekkit): 0 Off, 1 Beta, 2 Faithful, 3 Realistic, 4 Cinematic, -1 Custom. */
+    int stylePreset(boolean enabled) {
+        if (!enabled) return 0;
+        if (look == 0 && !cinematic && cloudShadows <= 0.01f && !reflections && !waving && !waves && !godRays) return 1;
+        if (look == 1 && !cinematic && Math.abs(cloudShadows - 0.55f) < 0.02f && reflections && !waving && waves && !godRays) return 2;
+        if (look == 2 && !cinematic && Math.abs(cloudShadows - 0.85f) < 0.02f && reflections && waving && waves && godRays) return 3;
+        if (look == 3 && cinematic && Math.abs(cloudShadows - 0.75f) < 0.02f && reflections && waving && waves && godRays) return 4;
+        return -1;
+    }
+
+    void applyStyle(int style) {
+        if (style == 0) { Hooks.enabled = false; return; }
+        Hooks.enabled = true;
+        if (style == 1) { look = 0; cinematic = false; cloudShadows = 0f; reflections = false; waving = false; waves = false; godRays = false; }
+        else if (style == 2) { look = 1; cinematic = false; cloudShadows = 0.55f; reflections = true; waving = false; waves = true; godRays = false; }
+        else if (style == 3) { look = 2; cinematic = false; cloudShadows = 0.85f; reflections = true; waving = true; waves = true; godRays = true; }
+        else { look = 3; cinematic = true; cloudShadows = 0.75f; reflections = true; waving = true; waves = true; godRays = true; }
     }
 
     private static File file() { return new File("classicpt.properties"); }

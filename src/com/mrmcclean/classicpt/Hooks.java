@@ -169,9 +169,15 @@ public final class Hooks {
         Settings s = tracer.settings;
         switch (i) {
             case 0: toggle(); return;
-            case 1: s.applyPreset((s.preset + 1) % 3); say("Path tracer preset: " + Settings.PRESETS[s.preset]); break;
+            case 1: {
+                int cur = s.stylePreset(enabled);
+                int next = cur < 0 ? 2 : (cur + 1) % Settings.STYLES.length;
+                s.applyStyle(next);
+                say("Path tracer preset: " + Settings.STYLES[next] + (next == 0 ? " (game renderer)" : ""));
+                break;
+            }
             case 2: s.denoiser = (s.denoiser + 1) % 3; say("Path tracer denoiser: " + Settings.DENOISERS[s.denoiser]); break;
-            case 3: s.look = (s.look + 1) % Settings.LOOKS.length; say("Path tracer look: " + Settings.LOOKS[s.look]); break;
+            case 3: s.look = (s.look + 1) % Settings.LOOKS.length; s.cinematic = s.look == 3; say("Path tracer look: " + Settings.LOOKS[s.look]); break;
             case 4:
                 if (!s.photoEnabled) say("Photo mode is off: photo.enabled=true in classicpt.properties");
                 else if (enabled) tracer.startPhoto(); else say("Photo mode needs the path tracer on (F7)");

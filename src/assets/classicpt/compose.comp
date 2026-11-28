@@ -27,7 +27,7 @@ void main() {
     c *= alb * uExposure * uBrightness;
     if (uCinematic != 0) {
         vec2 uv = (vec2(px) + 0.5) / vec2(uRes);
-        c += max(textureLod(uBloom, uv, 0.0).rgb, vec3(0.0)) * 0.28;
+        c += max(textureLod(uBloom, uv, 0.0).rgb, vec3(0.0)) * 0.24;
         c = aces(c * 0.92);
         float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
         c = clamp(mix(vec3(l), c, 1.08), 0.0, 1.0);
