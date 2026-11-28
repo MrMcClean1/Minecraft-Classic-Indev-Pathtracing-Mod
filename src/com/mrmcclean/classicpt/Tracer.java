@@ -47,7 +47,10 @@ final class Tracer {
     /** Set by Hooks for this frame: the picture goes under the game's mobs and hand, with the traced depth. */
     boolean underGame;
     private int jitterFrame;
-    private float jitX, jitY;
+    private float jitX, jitY, prevJitX, prevJitY;
+    private final FloatBuffer camMv = BufferUtils.createFloatBuffer(16), camPr = BufferUtils.createFloatBuffer(16);
+    private final GLSync[] frameFences = new GLSync[2];
+    private int frameFenceIdx;
     boolean dlssActive, rrActive, rrFailed; // what made the last frame's picture; RR off after it refused (until F7)
     /** AMD FSR 3.1 (upscaler=fsr, any GPU): the other tracers' port, fed the same depth and motion DLSS gets. */
     private final Fsr3 fsr = new Fsr3();
@@ -434,22 +437,59 @@ final class Tracer {
         targets(tw, th);
         if ((st.lowLatency == 2 || st.frameGeneration) && VkBridge.reflexOn()) { VkBridge.reflexFrame(0); VkBridge.reflexFrame(1); VkBridge.reflexFrame(2); }
         else if (st.lowLatency >= 1) GL11.glFinish(); // low latency: no frame waits in line
+        else {
+            // 2-slot fence ring: allows 1 frame of CPU/GPU overlap without building a multi-frame lag queue
+            GLSync fence = frameFences[frameFenceIdx];
+            if (fence != null) {
+                GL32.glClientWaitSync(fence, GL32.GL_SYNC_FLUSH_COMMANDS_BIT, 100_000_000L);
+                GL32.glDeleteSync(fence);
+                frameFences[frameFenceIdx] = null;
+            }
+        }
+        prevJitX = jitX; prevJitY = jitY;
         if (dlssFrame) { jitterFrame++; jitX = halton(jitterFrame, 2, tw, w) - 0.5f; jitY = halton(jitterFrame, 3, tw, w) - 0.5f; }
         else if (fsrFrame) { float[] j = Fsr3.jitter(jitterFrame++, tw, w); jitX = j[0]; jitY = j[1]; }
         else { jitX = 0f; jitY = 0f; }
 
-        // camera (Classic and Indev: pitch down is positive, yaw turns from -z toward +x)
-        double yaw = Math.toRadians(v[3]), pitch = Math.toRadians(v[4]);
-        float fx = (float) (Math.sin(yaw) * Math.cos(pitch)), fy = (float) -Math.sin(pitch), fz = (float) (-Math.cos(yaw) * Math.cos(pitch));
-        float rx = (float) Math.cos(yaw), rz = (float) Math.sin(yaw);
-        float ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;  // right x forward
-        // both games pull the camera 0.1 back from the eye (glTranslatef(0, 0, -0.1) before turning): the same here, so
-        // the traced depth lines up with what the game draws over it (cracks and the outline lie right on a face)
-        float[] camNow = {v[0] - fx * 0.1f, v[1] - fy * 0.1f, v[2] - fz * 0.1f, fx, fy, fz, rx, 0, rz, ux, uy, uz};
+        // camera: when tracing under the game's mobs/outline/hand during live play, read the game's actual
+        // OpenGL modelview + projection matrices so view bobbing, hurt tilt and water FOV stay pixel-locked.
+        float[] camNow = null;
+        float tan = (float) Math.tan(Math.toRadians(70) / 2);
+        if (underGame && !Test.running() && !TimeLapse.running() && !Museum.running()) {
+            camMv.clear(); camPr.clear();
+            GL11.glGetFloat(GL11.GL_MODELVIEW_MATRIX, camMv);
+            GL11.glGetFloat(GL11.GL_PROJECTION_MATRIX, camPr);
+            float m0 = camMv.get(0), m1 = camMv.get(1), m2 = camMv.get(2);
+            float m4 = camMv.get(4), m5 = camMv.get(5), m6 = camMv.get(6);
+            float m8 = camMv.get(8), m9 = camMv.get(9), m10 = camMv.get(10);
+            float tx = camMv.get(12), ty = camMv.get(13), tz = camMv.get(14);
+            float ex = -(m0 * tx + m1 * ty + m2 * tz);
+            float ey = -(m4 * tx + m5 * ty + m6 * tz);
+            float ez = -(m8 * tx + m9 * ty + m10 * tz);
+            float p5 = camPr.get(5);
+            if (p5 > 0.1f && Math.abs(ex - v[0]) + Math.abs(ey - v[1]) + Math.abs(ez - v[2]) < 2.5f) {
+                float l0 = (float) Math.sqrt(m0 * m0 + m4 * m4 + m8 * m8);
+                float l1 = (float) Math.sqrt(m1 * m1 + m5 * m5 + m9 * m9);
+                float l2 = (float) Math.sqrt(m2 * m2 + m6 * m6 + m10 * m10);
+                if (l0 > 1e-4f && l1 > 1e-4f && l2 > 1e-4f) {
+                    camNow = new float[]{ex, ey, ez, -m2 / l2, -m6 / l2, -m10 / l2, m0 / l0, m4 / l0, m8 / l0, m1 / l1, m5 / l1, m9 / l1};
+                    tan = 1f / p5;
+                }
+            }
+        }
+        if (camNow == null) {
+            // fallback (tests, time-lapse, museum, or beforeHud): pitch down is positive, yaw turns from -z toward +x
+            double yaw = Math.toRadians(v[3]), pitch = Math.toRadians(v[4]);
+            float fx = (float) (Math.sin(yaw) * Math.cos(pitch)), fy = (float) -Math.sin(pitch), fz = (float) (-Math.cos(yaw) * Math.cos(pitch));
+            float rx = (float) Math.cos(yaw), rz = (float) Math.sin(yaw);
+            float ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;  // right x forward
+            camNow = new float[]{v[0] - fx * 0.1f, v[1] - fy * 0.1f, v[2] - fz * 0.1f, fx, fy, fz, rx, 0, rz, ux, uy, uz};
+        }
+        float rx = camNow[6], rz = camNow[8];
         boolean nvReset = !historyValid || prevCam == null
                 || Math.abs(camNow[0] - prevCam[0]) + Math.abs(camNow[1] - prevCam[1]) + Math.abs(camNow[2] - prevCam[2]) > 8f;
         if (photo && prevCam != null && !Arrays.equals(prevCam, camNow)) { photo = false; photoTarget = null; photoThen = null; Hooks.say("Photo cancelled: the view moved"); }
-        float tan = (float) Math.tan(Math.toRadians(70) / 2), aspect = tw / (float) th;
+        float aspect = tw / (float) th;
         int gx = (tw + 7) / 8, gy = (th + 7) / 8;
         int prev = cur;
         cur ^= 1;
@@ -529,6 +569,8 @@ final class Tracer {
         // 2. temporal
         GL20.glUseProgram(progTemporal);
         camera(progTemporal, camNow, tan, aspect, tw, th);
+        GL20.glUniform2f(loc(progTemporal, "uJitter"), jitX, jitY);
+        GL20.glUniform2f(loc(progTemporal, "uPrevJitter"), prevJitX, prevJitY);
         GL20.glUniform3f(loc(progTemporal, "uPrevCam"), pc[0], pc[1], pc[2]);
         GL20.glUniform3f(loc(progTemporal, "uPrevFwd"), pc[3], pc[4], pc[5]);
         GL20.glUniform3f(loc(progTemporal, "uPrevRight"), pc[6], pc[7], pc[8]);
@@ -617,6 +659,11 @@ final class Tracer {
         GL11.glBindTexture(GL12.GL_TEXTURE_3D, 0);
         if ((settings.lowLatency == 2 || settings.frameGeneration) && VkBridge.reflexOn()) VkBridge.reflexFrame(3); // Reflex: the frame's commands are handed over
         draw(tex, w, h);
+        if (settings.lowLatency == 0 && !settings.frameGeneration) {
+            if (frameFences[frameFenceIdx] != null) GL32.glDeleteSync(frameFences[frameFenceIdx]);
+            frameFences[frameFenceIdx] = GL32.glFenceSync(GL32.GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            frameFenceIdx ^= 1;
+        }
         prevCam = camNow;
         historyValid = true;
         frame++;

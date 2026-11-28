@@ -13,6 +13,7 @@ layout(rgba16f, binding = 4) uniform writeonly image2D outAccum;
 uniform ivec2 uRes;
 uniform vec3 uCam, uFwd, uRight, uUp, uPrevCam, uPrevFwd, uPrevRight, uPrevUp;
 uniform float uTan, uAspect;
+uniform vec2 uJitter, uPrevJitter;
 uniform int uHistoryValid;   // 0 after a resize, a level change, the tracer turned on
 uniform float uMaxHistory;   // frames averaged at most: more is smoother, light changes lag more
 uniform int uAdvanced;       // 1: also cut fireflies (Denoiser: Advanced)
@@ -38,14 +39,14 @@ void main() {
         float cap = 6.0 * ns / 8.0 + 0.3, lc = luminance(cur);
         if (lc > cap) cur *= cap / lc;
     }
-    vec3 world = uCam + rayDir(vec2(px), uFwd, uRight, uUp) * g.w;
+    vec3 world = uCam + rayDir(vec2(px) + uJitter, uFwd, uRight, uUp) * g.w;
     vec3 rel = world - uPrevCam;
     float z = dot(rel, uPrevFwd);
     vec3 sum = vec3(0.0);
     float len = 0.0, wsum = 0.0;
     if (uHistoryValid != 0 && z > 0.05) {
         vec2 ndc = vec2(dot(rel, uPrevRight) / (z * uTan * uAspect), dot(rel, uPrevUp) / (z * uTan));
-        vec2 p = (ndc * 0.5 + 0.5) * vec2(uRes) - 0.5;
+        vec2 p = (ndc * 0.5 + 0.5) * vec2(uRes) - 0.5 - uPrevJitter;
         ivec2 base = ivec2(floor(p));
         vec2 f = p - vec2(base);
         float tol = 0.05 + 0.015 * g.w;
@@ -54,7 +55,7 @@ void main() {
             if (q.x < 0 || q.y < 0 || q.x >= uRes.x || q.y >= uRes.y) continue;
             vec4 pg = imageLoad(uPrevGeom, q);
             if (pg.w < 0.0 || dot(pg.xyz, g.xyz) < 0.9) continue;
-            vec3 qWorld = uPrevCam + rayDir(vec2(q), uPrevFwd, uPrevRight, uPrevUp) * pg.w;
+            vec3 qWorld = uPrevCam + rayDir(vec2(q) + uPrevJitter, uPrevFwd, uPrevRight, uPrevUp) * pg.w;
             if (abs(dot(qWorld - world, g.xyz)) > tol) continue;
             float w = ((i & 1) == 1 ? f.x : 1.0 - f.x) * ((i >> 1) == 1 ? f.y : 1.0 - f.y);
             vec4 acc = imageLoad(uPrevAccum, q);
