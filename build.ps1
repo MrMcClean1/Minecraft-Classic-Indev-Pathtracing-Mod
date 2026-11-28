@@ -6,7 +6,7 @@
 param([string]$Version = '1.0.0')
 $ErrorActionPreference = 'Stop'
 $jdk = 'C:\Program Files\Eclipse Adoptium\jdk-25.0.4.101-hotspot\bin'
-$lib = '%USERPROFILE%\Desktop\MultiMC\libraries'
+$lib = "$env:USERPROFILE\Desktop\MultiMC\libraries"
 $cp = @("$lib\org\mcphackers\launchwrapper\1.3.0\launchwrapper-1.3.0.jar",
         "$lib\org\ow2\asm\asm\9.10.1\asm-9.10.1.jar",
         "$lib\org\ow2\asm\asm-tree\9.10.1\asm-tree-9.10.1.jar",

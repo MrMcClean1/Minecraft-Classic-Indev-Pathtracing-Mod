@@ -4,7 +4,7 @@
 #   .\install.ps1 c0.30-s-1858      .\install.ps1 in-20100223      .\install.ps1 <instance> -Remove
 param([Parameter(Mandatory)][string]$Instance, [string]$Version = '1.0.0', [switch]$Remove)
 $ErrorActionPreference = 'Stop'
-$inst = "%USERPROFILE%\Desktop\MultiMC\instances\$Instance"
+$inst = "$env:USERPROFILE\Desktop\MultiMC\instances\$Instance"
 if (-not (Test-Path "$inst\mmc-pack.json")) { throw "no instance $Instance" }
 $uid = 'com.mrmcclean.classicpt'
 $packPath = "$inst\mmc-pack.json"
